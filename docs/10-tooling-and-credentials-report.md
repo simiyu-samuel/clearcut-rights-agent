@@ -1,7 +1,7 @@
 # ClearCut Tooling, Accounts & Credential Readiness Report
 
 **Date:** 2026-08-22  
-**Status:** Ready for account setup; live cloud and partner credentials are not configured yet
+**Status:** Google Cloud and Parallel credentials configured; staging deployment packaging is ready
 
 ## Executive answer
 
@@ -21,7 +21,19 @@ Parallel Search / Extract
 Gemini on Vertex AI, with human approval as the safety boundary
 ```
 
-The current repository already has a working fixture-mode vertical slice. It can upload a screenplay, extract candidate rights-bearing assets, run fixture research, create an evidence-backed clearance card, show citations, and record a human approval. The live integrations are deliberately disabled by default so local development and judging do not depend on credentials.
+The current repository already has a working fixture-mode vertical slice. It can upload a screenplay, extract candidate rights-bearing assets, run fixture research, create an evidence-backed clearance card, show citations, and record a human approval. Google Cloud project `clearcut-rights-dev` and the Parallel API key are now configured for staging without committing credentials. Fixture mode remains the local default so development and judging do not depend on live services.
+
+### Current setup checkpoint
+
+- Google Cloud project: `clearcut-rights-dev`;
+- billing: active;
+- region: `us-central1`;
+- Vertex AI, Cloud Run, Cloud Build, Artifact Registry, Secret Manager, Cloud SQL, Cloud Storage, and related APIs: enabled;
+- runtime service account: `clearcut-runtime`;
+- deployment service account: `clearcut-deployer`, used through impersonation rather than a JSON key;
+- Artifact Registry repository: `clearcut` with vulnerability scanning active;
+- Parallel secret: `parallel-api-key`, version 1 stored in Secret Manager;
+- container packaging: API and web Dockerfiles plus Cloud Build image publishing configuration implemented and locally built successfully.
 
 ## 1. What we are using now
 
@@ -37,7 +49,7 @@ The current repository already has a working fixture-mode vertical slice. It can
 | Gemini reasoning | Google Gen AI SDK Vertex path | Implemented as optional runtime path | `services/api/src/clearcut_api/agent_runtime.py` |
 | ADK / Agent Builder path | Registered root-agent tools + Agent Engine wrapper | Scaffolded, not deployed | `services/api/src/clearcut_api/adk_agent.py`, `agent_tools.py` |
 | Review safety | Clearance cards, approval decisions, audit events | Implemented | `models.py`, `main.py`, review queue UI |
-| Cloud deployment | Cloud Run / Agent Engine | Not implemented yet | Next infrastructure milestone |
+| Cloud deployment | Cloud Run / Agent Engine | Container packaging implemented; Cloud Run not deployed yet | Next infrastructure milestone |
 
 ## 2. How this maps to the supplied phase brief
 
@@ -47,7 +59,7 @@ We selected the custom developer SDK route, not the low-code route. The current 
 
 What is not done yet:
 
-- no Google Cloud project is connected to the application;
+- no Cloud Run service or Agent Engine resource has been deployed yet;
 - no live Gemini request has been run from this repository;
 - registered ADK tools exist, but they are not yet deployed or connected to a hosted Agent Engine runtime;
 - no Agent Engine resource has been deployed.
@@ -116,17 +128,17 @@ Not yet implemented:
 
 ## 3. Accounts and credentials to prepare
 
-### Required now
+### Configured for staging
 
 #### A. Google Cloud account and project
 
-Please prepare:
+Configured:
 
-- a Google account with permission to create or use a Google Cloud project;
-- one Google Cloud project ID for development/staging;
-- billing enabled, or approved hackathon credits attached;
-- preferred region, with `us-central1` as our current default;
-- permission to enable APIs and create service accounts.
+- Google Cloud project `clearcut-rights-dev`;
+- active billing;
+- `us-central1` as the deployment region;
+- service accounts and least-privilege deployment bindings;
+- no long-lived JSON service-account key.
 
 For the first live Gemini test, enable:
 
@@ -156,11 +168,11 @@ Do not create or send a long-lived JSON service-account key unless there is no a
 
 #### B. Parallel account and API key
 
-Please prepare:
+Configured:
 
 - a Parallel Platform account;
-- a Parallel API key for the ClearCut application;
-- any hackathon partner credits or quota associated with the account.
+- a Parallel API key stored as Secret Manager secret `parallel-api-key`, version 1;
+- the API key is not present in the repository or chat.
 
 We will configure:
 
@@ -220,14 +232,13 @@ The last two values remain local-development defaults. For staging/production th
 
 ## 5. Exact order of setup
 
-1. Create or select the Google Cloud project and attach billing/credits.
-2. Enable Vertex AI API and complete local ADC authentication.
-3. Create the Parallel account and API key.
-4. Put the values into the ignored root `.env` file; the API loads it automatically in local development. Do not send the secret values in chat.
-5. We install the hosted Agent Engine dependencies and connect the registered ClearCut ADK tools to the persistence-aware workflow.
-6. We run a live Gemini + Parallel smoke test while retaining fixture fallback.
-7. We provision Cloud Storage, Cloud SQL, Secret Manager, Cloud Run, and a staging service account.
-8. We deploy the full workflow and run the production-shaped demo.
+1. Complete container and Cloud Build validation.
+2. Provision Cloud Storage and Cloud SQL PostgreSQL.
+3. Add migrations and the managed object-store adapter.
+4. Deploy the API and web services to Cloud Run with the existing runtime identity and Secret Manager reference.
+5. Connect the registered ClearCut ADK tools to the hosted Agent Engine path.
+6. Run a live Gemini + Parallel smoke test while retaining fixture fallback.
+7. Deploy the production-shaped demo and exercise the approval/audit path.
 
 ## 6. What you should send back
 

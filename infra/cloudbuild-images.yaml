@@ -1,0 +1,46 @@
+substitutions:
+  _REGION: us-central1
+  _REPOSITORY: clearcut
+  _TAG: latest
+  _NEXT_PUBLIC_API_URL: http://localhost:8000
+
+steps:
+  - id: build-api
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=services/api/Dockerfile
+      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/clearcut-api:${_TAG}
+      - .
+
+  - id: push-api
+    name: gcr.io/cloud-builders/docker
+    waitFor:
+      - build-api
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/clearcut-api:${_TAG}
+
+  - id: build-web
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=apps/web/Dockerfile
+      - --build-arg=NEXT_PUBLIC_API_URL=${_NEXT_PUBLIC_API_URL}
+      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/clearcut-web:${_TAG}
+      - .
+
+  - id: push-web
+    name: gcr.io/cloud-builders/docker
+    waitFor:
+      - build-web
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/clearcut-web:${_TAG}
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/clearcut-api:${_TAG}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/clearcut-web:${_TAG}
+
+options:
+  logging: CLOUD_LOGGING_ONLY

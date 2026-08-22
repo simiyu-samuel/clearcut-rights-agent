@@ -6,6 +6,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typedRoutes: true,
+  output: "standalone",
   outputFileTracingRoot: repositoryRoot,
 };
 
