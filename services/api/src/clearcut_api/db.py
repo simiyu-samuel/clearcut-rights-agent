@@ -28,4 +28,7 @@ def create_database(database_url: str) -> Database:
     if poolclass is not None:
         engine_kwargs["poolclass"] = poolclass
     engine = create_engine(database_url, **engine_kwargs)
-    return Database(engine=engine, session_factory=sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
+    return Database(
+        engine=engine,
+        session_factory=sessionmaker(bind=engine, autoflush=False, expire_on_commit=False),
+    )

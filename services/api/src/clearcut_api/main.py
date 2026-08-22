@@ -1,18 +1,56 @@
-from contextlib import asynccontextmanager
 import json
+from contextlib import asynccontextmanager
+from hashlib import sha256
+from pathlib import Path
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import Database, create_database
-from .models import Job, Project
-from .repositories import JobRepository, ProjectRepository
-from .schemas import AnalysisRunCreate, JobRead, ProjectCreate, ProjectRead
+from .models import Document, Job, Project, ResearchRun
+from .repositories import (
+    AssetRepository,
+    DocumentRepository,
+    JobRepository,
+    ProjectRepository,
+    ResearchRunRepository,
+)
+from .schemas import (
+    AnalysisRunCreate,
+    AssetRead,
+    DocumentRead,
+    JobRead,
+    ProjectCreate,
+    ProjectRead,
+    ResearchRunCreate,
+    ResearchRunRead,
+    SourceRecordRead,
+)
+from .storage import LocalObjectStore
+from .workflows import process_document_analysis, process_research_run
+
+ALLOWED_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
+ALLOWED_TEXT_MIME_TYPES = {"text/plain", "text/markdown", "application/octet-stream"}
 
 
-def create_app(database: Database | None = None) -> FastAPI:
+def create_app(
+    database: Database | None = None, storage: LocalObjectStore | None = None
+) -> FastAPI:
     db = database or create_database(settings.database_url)
+    object_store = storage or LocalObjectStore(settings.storage_root)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -25,6 +63,17 @@ def create_app(database: Database | None = None) -> FastAPI:
         description="Evidence-backed rights-clearance workflow API.",
         lifespan=lifespan,
     )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            origin.strip() for origin in settings.web_allowed_origins.split(",") if origin.strip()
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.state.database = db
+    app.state.object_store = object_store
 
     def get_db():
         with db.session_factory() as session:
@@ -32,6 +81,12 @@ def create_app(database: Database | None = None) -> FastAPI:
 
     def get_organization_id(x_organization_id: str | None = Header(default=None)) -> str:
         return x_organization_id or settings.default_organization_id
+
+    def require_project(session: Session, project_id: str, organization_id: str) -> Project:
+        project = ProjectRepository(session).get(project_id, organization_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="project_not_found")
+        return project
 
     @app.get("/healthz", tags=["system"])
     def healthz() -> dict[str, str]:
@@ -45,7 +100,12 @@ def create_app(database: Database | None = None) -> FastAPI:
             raise HTTPException(status_code=503, detail="database_not_ready") from exc
         return {"status": "ready"}
 
-    @app.post("/v1/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED, tags=["projects"])
+    @app.post(
+        "/v1/projects",
+        response_model=ProjectRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["projects"],
+    )
     def create_project(
         payload: ProjectCreate,
         session: Session = Depends(get_db),
@@ -67,21 +127,90 @@ def create_app(database: Database | None = None) -> FastAPI:
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Project:
-        project = ProjectRepository(session).get(project_id, organization_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="project_not_found")
-        return project
+        return require_project(session, project_id, organization_id)
 
-    @app.post("/v1/projects/{project_id}/analysis-runs", response_model=JobRead, status_code=status.HTTP_202_ACCEPTED, tags=["analysis"])
+    @app.post(
+        "/v1/projects/{project_id}/documents",
+        response_model=DocumentRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["documents"],
+    )
+    async def upload_document(
+        project_id: str,
+        file: UploadFile = File(...),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Document:
+        require_project(session, project_id, organization_id)
+        filename = Path(file.filename or "upload.txt").name
+        extension = Path(filename).suffix.lower()
+        content_type = (file.content_type or "application/octet-stream").lower()
+        if extension not in ALLOWED_TEXT_EXTENSIONS or content_type not in ALLOWED_TEXT_MIME_TYPES:
+            raise HTTPException(
+                status_code=415, detail="only_utf8_text_and_markdown_documents_are_supported"
+            )
+        content = await file.read(settings.max_upload_bytes + 1)
+        if len(content) > settings.max_upload_bytes:
+            raise HTTPException(status_code=413, detail="document_too_large")
+        try:
+            content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=415, detail="document_must_be_utf8") from exc
+
+        document_id = str(uuid4())
+        object_key = f"{organization_id}/{project_id}/{document_id}.source"
+        object_store.save_bytes(object_key, content)
+        document = Document(
+            id=document_id,
+            organization_id=organization_id,
+            project_id=project_id,
+            original_filename=filename,
+            mime_type=content_type,
+            size_bytes=len(content),
+            sha256=sha256(content).hexdigest(),
+            object_key=object_key,
+            extracted_text=content.decode("utf-8"),
+        )
+        return DocumentRepository(session).create(document)
+
+    @app.get(
+        "/v1/projects/{project_id}/documents", response_model=list[DocumentRead], tags=["documents"]
+    )
+    def list_documents(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[Document]:
+        require_project(session, project_id, organization_id)
+        return DocumentRepository(session).list(project_id, organization_id)
+
+    @app.get("/v1/projects/{project_id}/assets", response_model=list[AssetRead], tags=["assets"])
+    def list_assets(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ):
+        require_project(session, project_id, organization_id)
+        return AssetRepository(session).list_for_project(project_id, organization_id)
+
+    @app.post(
+        "/v1/projects/{project_id}/analysis-runs",
+        response_model=JobRead,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["analysis"],
+    )
     def create_analysis_run(
         project_id: str,
         payload: AnalysisRunCreate,
+        background_tasks: BackgroundTasks,
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Job:
-        project = ProjectRepository(session).get(project_id, organization_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="project_not_found")
+        require_project(session, project_id, organization_id)
+        if payload.document_id is not None:
+            document = DocumentRepository(session).get(payload.document_id, organization_id)
+            if document is None or document.project_id != project_id:
+                raise HTTPException(status_code=404, detail="document_not_found")
         job = Job(
             organization_id=organization_id,
             project_id=project_id,
@@ -89,7 +218,17 @@ def create_app(database: Database | None = None) -> FastAPI:
             status="queued",
             metadata_json=json.dumps({"document_id": payload.document_id}),
         )
-        return JobRepository(session).create(job)
+        created = JobRepository(session).create(job)
+        if payload.document_id is not None:
+            background_tasks.add_task(
+                process_document_analysis,
+                db,
+                object_store,
+                created.id,
+                payload.document_id,
+                organization_id,
+            )
+        return created
 
     @app.get("/v1/jobs/{job_id}", response_model=JobRead, tags=["analysis"])
     def get_job(
@@ -101,6 +240,60 @@ def create_app(database: Database | None = None) -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail="job_not_found")
         return job
+
+    @app.post(
+        "/v1/assets/{asset_id}/research-runs",
+        response_model=ResearchRunRead,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["research"],
+    )
+    def create_research_run(
+        asset_id: str,
+        payload: ResearchRunCreate,
+        background_tasks: BackgroundTasks,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ResearchRun:
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        run = ResearchRun(
+            organization_id=organization_id,
+            asset_id=asset_id,
+            provider="parallel",
+            operation="search",
+            objective=payload.objective,
+            query=payload.query,
+        )
+        created = ResearchRunRepository(session).create(run)
+        background_tasks.add_task(process_research_run, db, created.id, organization_id, settings)
+        return created
+
+    @app.get("/v1/research-runs/{run_id}", response_model=ResearchRunRead, tags=["research"])
+    def get_research_run(
+        run_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ResearchRun:
+        run = ResearchRunRepository(session).get(run_id, organization_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="research_run_not_found")
+        return run
+
+    @app.get(
+        "/v1/research-runs/{run_id}/sources",
+        response_model=list[SourceRecordRead],
+        tags=["research"],
+    )
+    def list_research_sources(
+        run_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ):
+        run = ResearchRunRepository(session).get(run_id, organization_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="research_run_not_found")
+        return ResearchRunRepository(session).list_sources(run_id)
 
     @app.get("/", include_in_schema=False)
     def root(request: Request) -> dict[str, str]:

@@ -9,9 +9,13 @@ from clearcut_api.repositories import JobRepository, ProjectRepository
 
 
 def make_database() -> Database:
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(engine)
-    return Database(engine=engine, session_factory=sessionmaker(bind=engine, expire_on_commit=False))
+    return Database(
+        engine=engine, session_factory=sessionmaker(bind=engine, expire_on_commit=False)
+    )
 
 
 def test_system_routes_are_registered() -> None:
@@ -25,7 +29,11 @@ def test_project_lifecycle_and_tenant_scope() -> None:
     database = make_database()
     with database.session_factory() as session:
         repository = ProjectRepository(session)
-        created = repository.create(Project(organization_id="studio-a", title="The Last Signal", project_type="Feature film"))
+        created = repository.create(
+            Project(
+                organization_id="studio-a", title="The Last Signal", project_type="Feature film"
+            )
+        )
 
         assert repository.list("studio-a")[0].id == created.id
         assert repository.list("studio-b") == []
@@ -35,9 +43,16 @@ def test_project_lifecycle_and_tenant_scope() -> None:
 def test_analysis_run_is_queued_for_async_processing() -> None:
     database = make_database()
     with database.session_factory() as session:
-        project = ProjectRepository(session).create(Project(organization_id="demo-org", title="North Star", project_type="Series"))
+        project = ProjectRepository(session).create(
+            Project(organization_id="demo-org", title="North Star", project_type="Series")
+        )
         job = JobRepository(session).create(
-            Job(organization_id="demo-org", project_id=project.id, job_type="document_analysis", status="queued")
+            Job(
+                organization_id="demo-org",
+                project_id=project.id,
+                job_type="document_analysis",
+                status="queued",
+            )
         )
 
         stored = JobRepository(session).get(job.id, "demo-org")

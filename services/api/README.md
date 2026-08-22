@@ -19,9 +19,13 @@ The API will be available at `http://localhost:8000`. OpenAPI documentation is a
 
 - `/healthz` and `/readyz` operational endpoints;
 - tenant-scoped project creation, listing, and retrieval;
-- queued analysis-run endpoint;
+- secure UTF-8 screenplay/Markdown upload endpoint;
+- queued analysis-run endpoint with scene-aware deterministic asset extraction;
+- project asset inventory endpoint;
+- asynchronous research-run endpoint with fixture and live-capable Parallel adapters;
+- normalized source records with provider request IDs;
 - SQLAlchemy persistence with SQLite development default;
 - typed provider protocol and deterministic Parallel fixture provider;
-- tests for health, tenant isolation, and job creation.
+- tests for health, tenant isolation, extraction, analysis, and provider normalization.
 
-The live Parallel adapter and document-analysis worker are intentionally the next implementation milestone.
+Set `PARALLEL_MODE=live` and provide `PARALLEL_API_KEY` to use the documented Parallel v1 Search/Extract API adapter. Fixture mode is the default for local development and demo resilience.

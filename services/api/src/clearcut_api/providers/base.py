@@ -10,6 +10,7 @@ class SourceResult:
     excerpt: str
     retrieved_at: datetime
     source_quality: str
+    request_id: str | None = None
 
 
 class ResearchProvider(Protocol):

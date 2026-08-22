@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .base import SourceResult
 
@@ -7,7 +7,7 @@ class FixtureParallelProvider:
     """Deterministic local provider used until live Parallel credentials are configured."""
 
     async def search(self, query: str, *, objective: str) -> list[SourceResult]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             SourceResult(
                 url="https://example.com/clearcut/fixture-rights-source",
@@ -15,6 +15,7 @@ class FixtureParallelProvider:
                 excerpt=f"Synthetic evidence for the research objective: {objective}.",
                 retrieved_at=now,
                 source_quality="fixture",
+                request_id="fixture-search-001",
             )
         ]
 
@@ -23,6 +24,7 @@ class FixtureParallelProvider:
             url=url,
             title="Fixture extracted source",
             excerpt=f"Synthetic extracted evidence for: {objective}.",
-            retrieved_at=datetime.now(timezone.utc),
+            retrieved_at=datetime.now(UTC),
             source_quality="fixture",
+            request_id="fixture-extract-001",
         )
