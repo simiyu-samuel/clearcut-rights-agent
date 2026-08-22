@@ -118,3 +118,54 @@ class SourceRecord(Base):
     excerpt: Mapped[str] = mapped_column(Text)
     source_quality: Mapped[str] = mapped_column(String(40))
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ClearanceCard(Base):
+    __tablename__ = "clearance_cards"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    asset_id: Mapped[str] = mapped_column(String(36), index=True)
+    research_run_id: Mapped[str] = mapped_column(String(36), index=True)
+    generated_by: Mapped[str] = mapped_column(String(80))
+    model_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending_review", index=True)
+    risk_score: Mapped[int] = mapped_column(Integer)
+    confidence_score: Mapped[float] = mapped_column(default=0.0)
+    summary: Mapped[str] = mapped_column(Text)
+    recommendation: Mapped[str] = mapped_column(Text)
+    reason_codes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    evidence_count: Mapped[int] = mapped_column(Integer, default=0)
+    needs_human_review: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class Approval(Base):
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    asset_id: Mapped[str] = mapped_column(String(36), index=True)
+    clearance_card_id: Mapped[str] = mapped_column(String(36), index=True)
+    decision: Mapped[str] = mapped_column(String(60))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_id: Mapped[str] = mapped_column(String(120))
+    supersedes_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    actor_type: Mapped[str] = mapped_column(String(40))
+    actor_id: Mapped[str] = mapped_column(String(120))
+    action: Mapped[str] = mapped_column(String(120))
+    resource_type: Mapped[str] = mapped_column(String(80))
+    resource_id: Mapped[str] = mapped_column(String(36))
+    metadata_json: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

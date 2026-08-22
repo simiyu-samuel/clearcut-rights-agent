@@ -50,7 +50,7 @@ export type AssetResponse = {
   context: string;
   scene_reference: string | null;
   extraction_confidence: number;
-  risk_status: "high_risk" | "needs_review" | "likely_clear" | "blocked" | "insufficient_evidence";
+  risk_status: "high_risk" | "needs_review" | "likely_clear" | "blocked" | "insufficient_evidence" | "approved_for_delivery";
   reason_codes: string[];
   created_at: string;
   updated_at: string;
@@ -69,4 +69,42 @@ export type ResearchRunResponse = {
   error_code: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ClearanceCardResponse = {
+  id: string;
+  organization_id: string;
+  asset_id: string;
+  research_run_id: string;
+  generated_by: string;
+  model_name: string | null;
+  status: "pending_review" | "approved" | "needs_more_research" | "rejected" | "escalated";
+  risk_score: number;
+  confidence_score: number;
+  summary: string;
+  recommendation: string;
+  reason_codes: string[];
+  evidence_count: number;
+  needs_human_review: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApprovalDecision =
+  | "approve_next_action"
+  | "request_more_research"
+  | "mark_not_applicable"
+  | "reject"
+  | "escalate_to_legal";
+
+export type ApprovalResponse = {
+  id: string;
+  organization_id: string;
+  asset_id: string;
+  clearance_card_id: string;
+  decision: ApprovalDecision;
+  note: string | null;
+  actor_id: string;
+  supersedes_id: string | null;
+  created_at: string;
 };

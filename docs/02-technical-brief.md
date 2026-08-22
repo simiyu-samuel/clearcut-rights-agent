@@ -1,6 +1,6 @@
 # ClearCut Technical Brief
 
-**Status:** Pre-build planning  
+**Status:** Implementation baseline with production hardening in progress
 **Primary requirement:** Gemini + Google Cloud Agent Builder + Parallel runtime integration
 
 ## 1. Technical goals
@@ -30,8 +30,11 @@ The system must be:
 - Python service using FastAPI;
 - Google Agent Development Kit / Google Cloud Agent Builder integration;
 - Gemini model calls through the approved Google Cloud runtime;
+- deterministic fixture agent for local development and judging resilience;
 - explicit workflow state machine around agent steps;
 - typed tool contracts using Pydantic models.
+
+The current research workflow persists Parallel evidence, creates a clearance card, and pauses at `pending_review`. `AGENT_MODE=vertex` routes card generation through the Google Gen AI SDK on Vertex AI; `adk_agent.py` provides the optional Google ADK hosted-agent entry point. Neither mode can mark an asset as legally cleared. A human approval endpoint records the decision, transitions the internal workflow state, and writes an audit event.
 
 ### Persistence
 
@@ -154,7 +157,9 @@ GET    /v1/projects/{project_id}
 POST   /v1/projects/{project_id}/documents
 POST   /v1/projects/{project_id}/analysis-runs
 GET    /v1/projects/{project_id}/assets
+GET    /v1/projects/{project_id}/clearance-cards
 GET    /v1/assets/{asset_id}
+GET    /v1/assets/{asset_id}/clearance-card
 POST   /v1/assets/{asset_id}/research-runs
 POST   /v1/assets/{asset_id}/approvals
 POST   /v1/assets/{asset_id}/outreach-drafts
@@ -215,4 +220,3 @@ Maintain a labelled fixture set of scripts and expected asset categories. Track 
 - redacted observability payloads;
 - an incident runbook;
 - clear retention and deletion behavior.
-

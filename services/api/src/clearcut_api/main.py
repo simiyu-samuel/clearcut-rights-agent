@@ -20,9 +20,11 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import Database, create_database
-from .models import Document, Job, Project, ResearchRun
+from .models import Approval, AuditEvent, ClearanceCard, Document, Job, Project, ResearchRun
 from .repositories import (
+    ApprovalRepository,
     AssetRepository,
+    ClearanceCardRepository,
     DocumentRepository,
     JobRepository,
     ProjectRepository,
@@ -30,7 +32,10 @@ from .repositories import (
 )
 from .schemas import (
     AnalysisRunCreate,
+    ApprovalCreate,
+    ApprovalRead,
     AssetRead,
+    ClearanceCardRead,
     DocumentRead,
     JobRead,
     ProjectCreate,
@@ -193,6 +198,19 @@ def create_app(
         require_project(session, project_id, organization_id)
         return AssetRepository(session).list_for_project(project_id, organization_id)
 
+    @app.get(
+        "/v1/projects/{project_id}/clearance-cards",
+        response_model=list[ClearanceCardRead],
+        tags=["review"],
+    )
+    def list_clearance_cards(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[ClearanceCard]:
+        require_project(session, project_id, organization_id)
+        return ClearanceCardRepository(session).list_for_project(project_id, organization_id)
+
     @app.post(
         "/v1/projects/{project_id}/analysis-runs",
         response_model=JobRead,
@@ -294,6 +312,84 @@ def create_app(
         if run is None:
             raise HTTPException(status_code=404, detail="research_run_not_found")
         return ResearchRunRepository(session).list_sources(run_id)
+
+    @app.get(
+        "/v1/assets/{asset_id}/clearance-card",
+        response_model=ClearanceCardRead,
+        tags=["review"],
+    )
+    def get_clearance_card(
+        asset_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ClearanceCard:
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        card = ClearanceCardRepository(session).get_for_asset(asset_id, organization_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="clearance_card_not_found")
+        return card
+
+    @app.post(
+        "/v1/assets/{asset_id}/approvals",
+        response_model=ApprovalRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["review"],
+    )
+    def record_approval(
+        asset_id: str,
+        payload: ApprovalCreate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Approval:
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        cards = ClearanceCardRepository(session)
+        card = cards.get_for_asset(asset_id, organization_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="clearance_card_not_found")
+
+        card_status_by_decision = {
+            "approve_next_action": ("approved", "approved_for_delivery", False),
+            "request_more_research": ("needs_more_research", "needs_review", True),
+            "mark_not_applicable": ("approved", "likely_clear", False),
+            "reject": ("rejected", "blocked", False),
+            "escalate_to_legal": ("escalated", "blocked", True),
+        }
+        card_status, risk_status, needs_human_review = card_status_by_decision[payload.decision]
+        latest_approval = ApprovalRepository(session).get_latest_for_card(card.id, organization_id)
+        approval = Approval(
+            organization_id=organization_id,
+            asset_id=asset_id,
+            clearance_card_id=card.id,
+            decision=payload.decision,
+            note=payload.note,
+            actor_id=x_actor_id or "demo-user",
+            supersedes_id=latest_approval.id if latest_approval else None,
+        )
+        card.status = card_status
+        card.needs_human_review = needs_human_review
+        asset.risk_status = risk_status
+        session.add(approval)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=approval.actor_id,
+                action="approval.recorded",
+                resource_type="asset",
+                resource_id=asset_id,
+                metadata_json=json.dumps(
+                    {"decision": payload.decision, "clearance_card_id": card.id}
+                ),
+            )
+        )
+        session.commit()
+        session.refresh(approval)
+        return approval
 
     @app.get("/", include_in_schema=False)
     def root(request: Request) -> dict[str, str]:

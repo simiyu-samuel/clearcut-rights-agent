@@ -1,14 +1,21 @@
+from .agent_runtime import AgentRuntimeError, build_clearance_agent
 from .config import Settings
 from .db import Database
 from .extraction import extract_candidate_assets
-from .models import Asset, SourceRecord
+from .models import Asset, ClearanceCard, SourceRecord
 from .providers import (
     FixtureParallelProvider,
     ParallelApiProvider,
     ParallelProviderError,
     ResearchProvider,
 )
-from .repositories import AssetRepository, DocumentRepository, JobRepository, ResearchRunRepository
+from .repositories import (
+    AssetRepository,
+    ClearanceCardRepository,
+    DocumentRepository,
+    JobRepository,
+    ResearchRunRepository,
+)
 from .storage import LocalObjectStore
 
 
@@ -81,10 +88,13 @@ async def process_research_run(
             runs.update(run_id, status="failed", error_code="asset_not_found")
             return
         runs.update(run_id, status="running")
+        query = run.query
+        objective = run.objective
+        asset_id = asset.id
 
     try:
         provider = make_research_provider(settings)
-        results = await provider.search(run.query, objective=run.objective)
+        results = await provider.search(query, objective=objective)
         with database.session_factory() as session:
             runs = ResearchRunRepository(session)
             sources = [
@@ -104,6 +114,40 @@ async def process_research_run(
             runs.update(
                 run_id, status="completed" if sources else "partial", provider_request_id=request_id
             )
+            asset = AssetRepository(session).get(asset_id, organization_id)
+            stored_sources = runs.list_sources(run_id)
+        if asset is None:
+            return
+
+        try:
+            card_output = await build_clearance_agent(settings).create_clearance_card(
+                asset, stored_sources
+            )
+        except AgentRuntimeError as exc:
+            with database.session_factory() as session:
+                ResearchRunRepository(session).update(run_id, status="failed", error_code=exc.code)
+            return
+
+        with database.session_factory() as session:
+            cards = ClearanceCardRepository(session)
+            if cards.get_for_run(run_id, organization_id) is None:
+                cards.create(
+                    ClearanceCard(
+                        organization_id=organization_id,
+                        asset_id=asset_id,
+                        research_run_id=run_id,
+                        generated_by=card_output.generated_by,
+                        model_name=card_output.model_name,
+                        status="pending_review" if stored_sources else "needs_more_research",
+                        risk_score=card_output.risk_score,
+                        confidence_score=card_output.confidence_score,
+                        summary=card_output.summary,
+                        recommendation=card_output.recommendation,
+                        reason_codes=card_output.reason_codes,
+                        evidence_count=len(stored_sources),
+                        needs_human_review=card_output.needs_human_review,
+                    )
+                )
     except ParallelProviderError as exc:
         with database.session_factory() as session:
             ResearchRunRepository(session).update(run_id, status="failed", error_code=exc.code)

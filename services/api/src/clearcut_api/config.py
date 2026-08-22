@@ -9,6 +9,8 @@ class Settings:
     default_organization_id: str = os.getenv("DEFAULT_ORGANIZATION_ID", "demo-org")
     parallel_mode: str = os.getenv("PARALLEL_MODE", "fixture")
     parallel_api_key: str | None = os.getenv("PARALLEL_API_KEY") or None
+    agent_mode: str = os.getenv("AGENT_MODE", "fixture")
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     google_cloud_project: str | None = os.getenv("GOOGLE_CLOUD_PROJECT") or None
     google_cloud_location: str = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
     storage_root: str = os.getenv("STORAGE_ROOT", ".data/uploads")

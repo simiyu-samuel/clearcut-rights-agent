@@ -110,6 +110,38 @@ button { font: inherit; }
 .file-picker input { display: none; }
 .upload-message { color: var(--gold); font-size: 11px; }
 .secondary-button:disabled { cursor: wait; opacity: 0.55; }
+.review-panel { margin-bottom: 28px; }
+.panel-subtitle { color: var(--subtle); font-size: 11px; margin: 5px 0 0; }
+.review-message, .review-empty { color: var(--muted); font-size: 11px; padding: 17px 18px; }
+.review-message { color: var(--gold); }
+.clearance-grid { display: grid; gap: 1px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.clearance-card { border-right: 1px solid var(--line); border-top: 1px solid var(--line); padding: 18px; }
+.clearance-card:nth-child(2n) { border-right: 0; }
+.clearance-card-head { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; }
+.clearance-kicker { color: var(--gold); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+.clearance-card h3 { font-size: 15px; letter-spacing: -0.03em; margin: 6px 0 0; }
+.card-status { border-radius: 999px; color: var(--gold); font-size: 9px; letter-spacing: 0.04em; padding: 5px 8px; text-transform: uppercase; white-space: nowrap; }
+.card-status.approved { background: rgba(127, 212, 161, 0.1); color: var(--green); }
+.card-status.rejected, .card-status.escalated { background: rgba(242, 139, 139, 0.1); color: var(--red); }
+.card-status.needs_more_research { background: rgba(140, 183, 232, 0.1); color: var(--blue); }
+.clearance-metrics { border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); margin: 17px 0; padding: 10px 0; }
+.clearance-metrics div { display: grid; gap: 3px; }
+.clearance-metrics strong { font-size: 18px; font-weight: 500; }
+.clearance-metrics span { color: var(--subtle); font-size: 9px; text-transform: uppercase; }
+.clearance-summary { color: var(--muted); font-size: 11px; line-height: 1.55; margin: 0 0 15px; }
+.recommendation { border-left: 2px solid var(--gold-soft); padding-left: 11px; }
+.recommendation span { color: var(--subtle); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+.recommendation p { font-size: 11px; line-height: 1.5; margin: 6px 0 0; }
+.reason-codes { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 14px; }
+.reason-codes span { background: rgba(255, 255, 255, 0.04); color: var(--subtle); font-size: 9px; padding: 4px 6px; }
+.card-evidence { display: grid; gap: 6px; margin-top: 16px; }
+.card-evidence > span { color: var(--subtle); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; }
+.card-evidence a { color: var(--blue); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-evidence small { font-size: 9px; }
+.card-evidence em { color: var(--subtle); font-size: 10px; font-style: normal; }
+.review-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
+.review-actions button { font-size: 10px; padding: 9px 10px; }
+.review-complete { color: var(--green); font-size: 10px; margin-top: 18px; }
 .project-layout { display: grid; gap: 28px; grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.75fr); }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; }
 .panel-header { align-items: center; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; padding: 16px 18px; }
@@ -154,4 +186,6 @@ button { font: inherit; }
   .project-grid, .stats-grid { grid-template-columns: 1fr; }
   .asset-row { grid-template-columns: 30px minmax(0, 1fr) 72px; }
   .asset-category { display: none; }
+  .clearance-grid { grid-template-columns: 1fr; }
+  .clearance-card, .clearance-card:nth-child(2n) { border-right: 0; }
 }

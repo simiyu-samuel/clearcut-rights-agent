@@ -1,7 +1,17 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Asset, Document, Job, Project, ResearchRun, SourceRecord
+from .models import (
+    Approval,
+    Asset,
+    AuditEvent,
+    ClearanceCard,
+    Document,
+    Job,
+    Project,
+    ResearchRun,
+    SourceRecord,
+)
 
 
 class ProjectRepository:
@@ -156,3 +166,87 @@ class ResearchRunRepository:
             .order_by(SourceRecord.retrieved_at.asc())
         )
         return list(self.session.scalars(statement))
+
+
+class ClearanceCardRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, card: ClearanceCard) -> ClearanceCard:
+        self.session.add(card)
+        self.session.commit()
+        self.session.refresh(card)
+        return card
+
+    def get_for_asset(self, asset_id: str, organization_id: str) -> ClearanceCard | None:
+        statement = (
+            select(ClearanceCard)
+            .where(
+                ClearanceCard.asset_id == asset_id,
+                ClearanceCard.organization_id == organization_id,
+            )
+            .order_by(ClearanceCard.created_at.desc())
+        )
+        return self.session.scalars(statement).first()
+
+    def get_for_run(self, research_run_id: str, organization_id: str) -> ClearanceCard | None:
+        statement = select(ClearanceCard).where(
+            ClearanceCard.research_run_id == research_run_id,
+            ClearanceCard.organization_id == organization_id,
+        )
+        return self.session.scalars(statement).first()
+
+    def list_for_project(self, project_id: str, organization_id: str) -> list[ClearanceCard]:
+        statement = (
+            select(ClearanceCard)
+            .join(Asset, Asset.id == ClearanceCard.asset_id)
+            .where(
+                Asset.project_id == project_id,
+                ClearanceCard.organization_id == organization_id,
+            )
+            .order_by(ClearanceCard.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def update(self, card_id: str, **values: object) -> ClearanceCard | None:
+        card = self.session.get(ClearanceCard, card_id)
+        if card is None:
+            return None
+        for key, value in values.items():
+            setattr(card, key, value)
+        self.session.commit()
+        self.session.refresh(card)
+        return card
+
+
+class ApprovalRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, approval: Approval) -> Approval:
+        self.session.add(approval)
+        self.session.commit()
+        self.session.refresh(approval)
+        return approval
+
+    def get_latest_for_card(self, clearance_card_id: str, organization_id: str) -> Approval | None:
+        statement = (
+            select(Approval)
+            .where(
+                Approval.clearance_card_id == clearance_card_id,
+                Approval.organization_id == organization_id,
+            )
+            .order_by(Approval.created_at.desc())
+        )
+        return self.session.scalars(statement).first()
+
+
+class AuditRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, event: AuditEvent) -> AuditEvent:
+        self.session.add(event)
+        self.session.commit()
+        self.session.refresh(event)
+        return event

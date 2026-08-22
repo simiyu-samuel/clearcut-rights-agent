@@ -7,9 +7,22 @@ ProjectStatus = Literal["draft", "active", "review", "complete", "archived"]
 JobStatus = Literal["queued", "running", "awaiting_review", "completed", "failed"]
 DocumentStatus = Literal["uploaded", "processing", "analyzed", "failed"]
 RiskStatus = Literal[
-    "high_risk", "needs_review", "likely_clear", "blocked", "insufficient_evidence"
+    "high_risk",
+    "needs_review",
+    "likely_clear",
+    "blocked",
+    "insufficient_evidence",
+    "approved_for_delivery",
 ]
 ResearchStatus = Literal["queued", "running", "completed", "partial", "failed"]
+CardStatus = Literal["pending_review", "approved", "needs_more_research", "rejected", "escalated"]
+ApprovalDecision = Literal[
+    "approve_next_action",
+    "request_more_research",
+    "mark_not_applicable",
+    "reject",
+    "escalate_to_legal",
+]
 
 
 class ProjectCreate(BaseModel):
@@ -119,3 +132,43 @@ class ResearchRunRead(BaseModel):
     error_code: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class ClearanceCardRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    asset_id: str
+    research_run_id: str
+    generated_by: str
+    model_name: str | None
+    status: CardStatus
+    risk_score: int = Field(ge=0, le=100)
+    confidence_score: float = Field(ge=0, le=1)
+    summary: str
+    recommendation: str
+    reason_codes: list[str]
+    evidence_count: int = Field(ge=0)
+    needs_human_review: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ApprovalCreate(BaseModel):
+    decision: ApprovalDecision
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class ApprovalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    asset_id: str
+    clearance_card_id: str
+    decision: ApprovalDecision
+    note: str | None
+    actor_id: str
+    supersedes_id: str | None
+    created_at: datetime

@@ -1,17 +1,21 @@
 import asyncio
 from datetime import UTC
 
+from clearcut_api.agent_runtime import FixtureClearanceAgent
+from clearcut_api.config import Settings
 from clearcut_api.extraction import extract_candidate_assets
-from clearcut_api.models import Document, Job, Project
+from clearcut_api.models import Asset, Document, Job, Project, ResearchRun, SourceRecord
 from clearcut_api.providers.parallel_api import ParallelApiProvider
 from clearcut_api.repositories import (
     AssetRepository,
+    ClearanceCardRepository,
     DocumentRepository,
     JobRepository,
     ProjectRepository,
+    ResearchRunRepository,
 )
 from clearcut_api.storage import LocalObjectStore
-from clearcut_api.workflows import process_document_analysis
+from clearcut_api.workflows import process_document_analysis, process_research_run
 
 from .test_api import make_database
 
@@ -106,3 +110,84 @@ def test_parallel_search_response_is_normalized() -> None:
     assert results[0].request_id == "search_fixture_001"
     assert results[0].source_quality == "parallel_search"
     assert results[0].retrieved_at.tzinfo == UTC
+
+
+def test_fixture_clearance_agent_requires_human_review() -> None:
+    asset = Asset(
+        organization_id="demo-org",
+        project_id="project-1",
+        document_id="document-1",
+        canonical_name="Midnight City",
+        category="music",
+        context="A radio plays Midnight City.",
+        source_start=0,
+        source_end=32,
+        extraction_confidence=0.9,
+        risk_status="high_risk",
+        reason_codes=["music_identified"],
+    )
+    source = SourceRecord(
+        research_run_id="run-1",
+        url="https://example.com/rights",
+        title="Rights source",
+        excerpt="A licensing contact is identified.",
+        source_quality="fixture",
+    )
+
+    output = asyncio.run(FixtureClearanceAgent().create_clearance_card(asset, [source]))
+
+    assert output.risk_score == 90
+    assert output.needs_human_review is True
+    assert "music_rights_required" in output.reason_codes
+
+
+def test_research_run_creates_evidence_backed_clearance_card() -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        project = ProjectRepository(session).create(
+            Project(
+                organization_id="demo-org", title="The Last Signal", project_type="Feature film"
+            )
+        )
+        asset = Asset(
+            organization_id="demo-org",
+            project_id=project.id,
+            document_id="document-1",
+            canonical_name="Midnight City",
+            category="music",
+            context="A radio plays Midnight City.",
+            source_start=0,
+            source_end=32,
+            extraction_confidence=0.9,
+            risk_status="high_risk",
+            reason_codes=["music_identified"],
+        )
+        AssetRepository(session).create_many([asset])
+        run = ResearchRunRepository(session).create(
+            ResearchRun(
+                organization_id="demo-org",
+                asset_id=asset.id,
+                provider="parallel",
+                operation="search",
+                objective="Find the rights owner.",
+                query="Midnight City licensing",
+            )
+        )
+
+    asyncio.run(
+        process_research_run(
+            database,
+            run.id,
+            "demo-org",
+            Settings(parallel_mode="fixture", agent_mode="fixture"),
+        )
+    )
+
+    with database.session_factory() as session:
+        stored_run = ResearchRunRepository(session).get(run.id, "demo-org")
+        card = ClearanceCardRepository(session).get_for_run(run.id, "demo-org")
+        assert stored_run is not None and stored_run.status == "completed"
+        assert card is not None
+        assert card.evidence_count == 1
+        assert card.status == "pending_review"
+        assert card.needs_human_review is True
