@@ -24,7 +24,7 @@ pip install -e 'services/api[dev,agent]'
 
 ## Current foundation
 
-- `/healthz` and `/readyz` operational endpoints;
+- `/health` and `/readyz` operational endpoints (`/healthz` remains available for local compatibility);
 - tenant-scoped project creation, listing, and retrieval;
 - secure UTF-8 screenplay/Markdown upload endpoint;
 - queued analysis-run endpoint with scene-aware deterministic asset extraction;

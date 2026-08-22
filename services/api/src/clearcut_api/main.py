@@ -114,6 +114,10 @@ def create_app(
     def healthz() -> dict[str, str]:
         return {"status": "ok", "service": "clearcut-api", "version": "0.1.0"}
 
+    @app.get("/health", tags=["system"])
+    def health() -> dict[str, str]:
+        return {"status": "ok", "service": "clearcut-api", "version": "0.1.0"}
+
     @app.get("/readyz", tags=["system"])
     def readyz(session: Session = Depends(get_db)) -> dict[str, str]:
         try:

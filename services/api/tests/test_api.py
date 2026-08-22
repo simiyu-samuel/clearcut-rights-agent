@@ -21,7 +21,7 @@ def make_database() -> Database:
 def test_system_routes_are_registered() -> None:
     app = create_app(make_database())
     routes = {route.path for route in app.routes}
-    assert {"/healthz", "/readyz", "/openapi.json"}.issubset(routes)
+    assert {"/healthz", "/health", "/readyz", "/openapi.json"}.issubset(routes)
     assert app.title == "ClearCut API"
 
 
