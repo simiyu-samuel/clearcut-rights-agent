@@ -74,6 +74,12 @@ The deterministic evaluation of an asset for a specific project context.
 
 Key fields: `id`, `asset_id`, `policy_version`, `risk_status`, `risk_score`, `confidence_score`, `reason_codes`, `created_at`.
 
+### Clearance card
+
+The evidence-backed, human-reviewable recommendation generated for an asset and research run.
+
+Key fields: `id`, `asset_id`, `research_run_id`, `status`, `risk_score`, `confidence_score`, `recommendation`, `reason_codes`, `evidence_count`, `needs_human_review`.
+
 ### Approval
 
 A human decision on a risk assessment or proposed action.
@@ -85,6 +91,14 @@ Key fields: `id`, `asset_id`, `assessment_id`, `decision`, `decision_note`, `dec
 A generated permission request awaiting review or delivery.
 
 Key fields: `id`, `asset_id`, `recipient_hint`, `subject`, `body`, `status`, `approved_by`, `sent_at`.
+
+ClearCut may generate a draft, but the current workflow does not send it automatically.
+
+### Clearance report
+
+An immutable Markdown snapshot of the project’s current assets, clearance cards, decisions, and cited evidence.
+
+Key fields: `id`, `project_id`, `report_type`, `status`, `generated_by`, `content_markdown`, `created_at`.
 
 ### Audit event
 
@@ -129,4 +143,3 @@ erDiagram
 ## 5. Retention
 
 Retention must be configurable by organization and documented per record type. Deletion should be a workflow that records the deletion event while removing or anonymizing the underlying content according to policy.
-

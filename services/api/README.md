@@ -35,6 +35,8 @@ pip install -e 'services/api[dev,agent]'
 - registered ADK tools for rights search, source extraction, deterministic risk, and human-review intent;
 - an optional `AdkApp` wrapper ready for Agent Engine packaging;
 - human approval decisions with asset status transitions and audit events;
+- permission-request drafts that are reviewable but never sent automatically;
+- Markdown clearance report generation with source citations;
 - SQLAlchemy persistence with SQLite development default;
 - typed provider protocol and deterministic Parallel fixture provider;
 - tests for health, tenant isolation, extraction, analysis, and provider normalization.
@@ -50,3 +52,5 @@ Review endpoints:
 - `GET /v1/projects/{project_id}/clearance-cards`
 - `GET /v1/assets/{asset_id}/clearance-card`
 - `POST /v1/assets/{asset_id}/approvals`
+- `POST /v1/assets/{asset_id}/outreach-drafts`
+- `POST /v1/projects/{project_id}/reports`

@@ -6,8 +6,10 @@ from .models import (
     Asset,
     AuditEvent,
     ClearanceCard,
+    ClearanceReport,
     Document,
     Job,
+    OutreachDraft,
     Project,
     ResearchRun,
     SourceRecord,
@@ -250,3 +252,44 @@ class AuditRepository:
         self.session.commit()
         self.session.refresh(event)
         return event
+
+
+class OutreachDraftRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, draft: OutreachDraft) -> OutreachDraft:
+        self.session.add(draft)
+        self.session.commit()
+        self.session.refresh(draft)
+        return draft
+
+    def list_for_asset(self, asset_id: str, organization_id: str) -> list[OutreachDraft]:
+        statement = (
+            select(OutreachDraft)
+            .where(
+                OutreachDraft.asset_id == asset_id,
+                OutreachDraft.organization_id == organization_id,
+            )
+            .order_by(OutreachDraft.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+
+class ClearanceReportRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, report: ClearanceReport) -> ClearanceReport:
+        self.session.add(report)
+        self.session.commit()
+        self.session.refresh(report)
+        return report
+
+    def get(self, report_id: str, project_id: str, organization_id: str) -> ClearanceReport | None:
+        statement = select(ClearanceReport).where(
+            ClearanceReport.id == report_id,
+            ClearanceReport.project_id == project_id,
+            ClearanceReport.organization_id == organization_id,
+        )
+        return self.session.scalar(statement)

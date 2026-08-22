@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC
+from datetime import UTC, datetime
 
 from clearcut_api.agent_runtime import FixtureClearanceAgent
 from clearcut_api.agent_tools import (
@@ -11,8 +11,18 @@ from clearcut_api.agent_tools import (
 )
 from clearcut_api.config import Settings
 from clearcut_api.extraction import extract_candidate_assets
-from clearcut_api.models import Asset, Document, Job, Project, ResearchRun, SourceRecord
+from clearcut_api.models import (
+    Asset,
+    ClearanceCard,
+    Document,
+    Job,
+    Project,
+    ResearchRun,
+    SourceRecord,
+)
+from clearcut_api.outreach import build_outreach_draft
 from clearcut_api.providers.parallel_api import ParallelApiProvider
+from clearcut_api.reporting import build_clearance_report
 from clearcut_api.repositories import (
     AssetRepository,
     ClearanceCardRepository,
@@ -121,6 +131,7 @@ def test_parallel_search_response_is_normalized() -> None:
 
 def test_fixture_clearance_agent_requires_human_review() -> None:
     asset = Asset(
+        id="asset-1",
         organization_id="demo-org",
         project_id="project-1",
         document_id="document-1",
@@ -167,6 +178,59 @@ def test_registered_agent_tools_use_fixture_provider_and_preserve_review_boundar
     assert risk_result["needs_human_review"] is True
     assert approval_result["status"] == "pending_review"
     assert approval_result["requires_human_action"] is True
+
+
+def test_outreach_draft_and_report_keep_human_boundary() -> None:
+    project = Project(
+        organization_id="demo-org",
+        title="The Last Signal",
+        project_type="Feature film",
+    )
+    project.updated_at = datetime.now(UTC)
+    asset = Asset(
+        id="asset-1",
+        organization_id="demo-org",
+        project_id="project-1",
+        document_id="document-1",
+        canonical_name="Midnight City",
+        category="music",
+        context="A radio plays Midnight City.",
+        source_start=0,
+        source_end=32,
+        extraction_confidence=0.9,
+        risk_status="high_risk",
+        reason_codes=["music_identified"],
+    )
+    card = ClearanceCard(
+        organization_id="demo-org",
+        asset_id=asset.id,
+        research_run_id="run-1",
+        generated_by="fixture",
+        status="pending_review",
+        risk_score=90,
+        confidence_score=0.55,
+        summary="Evidence-backed music triage.",
+        recommendation="Request a synchronization/music license.",
+        reason_codes=["music_rights_required"],
+        evidence_count=1,
+        needs_human_review=True,
+    )
+    source = SourceRecord(
+        research_run_id="run-1",
+        url="https://example.com/rights",
+        title="Rights source",
+        excerpt="A licensing contact is identified.",
+        source_quality="fixture",
+    )
+
+    subject, body = build_outreach_draft(project, asset, card, "Rights contact")
+    report = build_clearance_report(project, [asset], [card], [source])
+
+    assert "Midnight City" in subject
+    assert "information request only" in body
+    assert "Internal research note" not in body
+    assert "not legal advice" in report
+    assert "https://example.com/rights" in report
 
 
 def test_research_run_creates_evidence_backed_clearance_card() -> None:

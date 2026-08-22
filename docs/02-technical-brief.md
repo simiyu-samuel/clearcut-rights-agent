@@ -34,7 +34,7 @@ The system must be:
 - explicit workflow state machine around agent steps;
 - typed tool contracts using Pydantic models.
 
-The current research workflow persists Parallel evidence, creates a clearance card, and pauses at `pending_review`. `AGENT_MODE=vertex` routes card generation through the Google Gen AI SDK on Vertex AI; `adk_agent.py` exposes registered Search, Extract, risk, and human-review tools plus an optional `AdkApp` wrapper for Agent Engine packaging. Neither mode can mark an asset as legally cleared. A human approval endpoint records the decision, transitions the internal workflow state, and writes an audit event.
+The current research workflow persists Parallel Search and Extract evidence, creates a clearance card, and pauses at `pending_review`. `AGENT_MODE=vertex` routes card generation through the Google Gen AI SDK on Vertex AI; `adk_agent.py` exposes registered Search, Extract, risk, and human-review tools plus an optional `AdkApp` wrapper for Agent Engine packaging. Permission-request drafts and Markdown reports are generated as reviewable artifacts; no message is sent automatically. Neither mode can mark an asset as legally cleared. A human approval endpoint records the decision, transitions the internal workflow state, and writes an audit event.
 
 ### Persistence
 
@@ -162,6 +162,8 @@ GET    /v1/assets/{asset_id}
 GET    /v1/assets/{asset_id}/clearance-card
 POST   /v1/assets/{asset_id}/research-runs
 POST   /v1/assets/{asset_id}/approvals
+POST   /v1/assets/{asset_id}/outreach-drafts
+POST   /v1/projects/{project_id}/reports
 POST   /v1/assets/{asset_id}/outreach-drafts
 GET    /v1/projects/{project_id}/reports/{report_id}
 GET    /v1/jobs/{job_id}

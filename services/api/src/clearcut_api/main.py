@@ -20,13 +20,27 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import Database, create_database
-from .models import Approval, AuditEvent, ClearanceCard, Document, Job, Project, ResearchRun
+from .models import (
+    Approval,
+    AuditEvent,
+    ClearanceCard,
+    ClearanceReport,
+    Document,
+    Job,
+    OutreachDraft,
+    Project,
+    ResearchRun,
+)
+from .outreach import build_outreach_draft
+from .reporting import build_clearance_report
 from .repositories import (
     ApprovalRepository,
     AssetRepository,
     ClearanceCardRepository,
+    ClearanceReportRepository,
     DocumentRepository,
     JobRepository,
+    OutreachDraftRepository,
     ProjectRepository,
     ResearchRunRepository,
 )
@@ -36,8 +50,11 @@ from .schemas import (
     ApprovalRead,
     AssetRead,
     ClearanceCardRead,
+    ClearanceReportRead,
     DocumentRead,
     JobRead,
+    OutreachDraftCreate,
+    OutreachDraftRead,
     ProjectCreate,
     ProjectRead,
     ResearchRunCreate,
@@ -390,6 +407,130 @@ def create_app(
         session.commit()
         session.refresh(approval)
         return approval
+
+    @app.post(
+        "/v1/assets/{asset_id}/outreach-drafts",
+        response_model=OutreachDraftRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["outreach"],
+    )
+    def create_outreach_draft(
+        asset_id: str,
+        payload: OutreachDraftCreate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> OutreachDraft:
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        card = ClearanceCardRepository(session).get_for_asset(asset_id, organization_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="clearance_card_not_found")
+        project = require_project(session, asset.project_id, organization_id)
+        subject, body = build_outreach_draft(project, asset, card, payload.recipient_hint)
+        actor_id = x_actor_id or "demo-user"
+        draft = OutreachDraft(
+            organization_id=organization_id,
+            asset_id=asset_id,
+            clearance_card_id=card.id,
+            recipient_hint=payload.recipient_hint,
+            subject=subject,
+            body=body,
+            status="draft",
+            generated_by="clearcut_template",
+            created_by=actor_id,
+        )
+        session.add(draft)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="outreach_draft.created",
+                resource_type="asset",
+                resource_id=asset_id,
+                metadata_json=json.dumps({"recipient_hint": payload.recipient_hint}),
+            )
+        )
+        session.commit()
+        session.refresh(draft)
+        return draft
+
+    @app.get(
+        "/v1/assets/{asset_id}/outreach-drafts",
+        response_model=list[OutreachDraftRead],
+        tags=["outreach"],
+    )
+    def list_outreach_drafts(
+        asset_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[OutreachDraft]:
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        return OutreachDraftRepository(session).list_for_asset(asset_id, organization_id)
+
+    @app.post(
+        "/v1/projects/{project_id}/reports",
+        response_model=ClearanceReportRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["reports"],
+    )
+    def create_report(
+        project_id: str,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ClearanceReport:
+        project = require_project(session, project_id, organization_id)
+        assets = AssetRepository(session).list_for_project(project_id, organization_id)
+        cards = ClearanceCardRepository(session).list_for_project(project_id, organization_id)
+        sources: list = []
+        runs = ResearchRunRepository(session)
+        for card in cards:
+            sources.extend(runs.list_sources(card.research_run_id))
+        report = ClearanceReport(
+            organization_id=organization_id,
+            project_id=project_id,
+            report_type="clearance_summary",
+            status="ready",
+            generated_by="clearcut_report_builder",
+            content_markdown=build_clearance_report(project, assets, cards, sources),
+        )
+        session.add(report)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=x_actor_id or "demo-user",
+                action="report.created",
+                resource_type="project",
+                resource_id=project_id,
+                metadata_json=json.dumps({"report_type": report.report_type}),
+            )
+        )
+        session.commit()
+        session.refresh(report)
+        return report
+
+    @app.get(
+        "/v1/projects/{project_id}/reports/{report_id}",
+        response_model=ClearanceReportRead,
+        tags=["reports"],
+    )
+    def get_report(
+        project_id: str,
+        report_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ClearanceReport:
+        require_project(session, project_id, organization_id)
+        report = ClearanceReportRepository(session).get(report_id, project_id, organization_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report_not_found")
+        return report
 
     @app.get("/", include_in_schema=False)
     def root(request: Request) -> dict[str, str]:

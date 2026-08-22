@@ -23,6 +23,8 @@ ApprovalDecision = Literal[
     "reject",
     "escalate_to_legal",
 ]
+OutreachDraftStatus = Literal["draft", "approved", "sent", "cancelled"]
+ReportStatus = Literal["ready", "failed"]
 
 
 class ProjectCreate(BaseModel):
@@ -172,4 +174,42 @@ class ApprovalRead(BaseModel):
     note: str | None
     actor_id: str
     supersedes_id: str | None
+    created_at: datetime
+
+
+class OutreachDraftCreate(BaseModel):
+    recipient_hint: str = Field(
+        default="Rights and licensing contact", min_length=2, max_length=255
+    )
+
+
+class OutreachDraftRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    asset_id: str
+    clearance_card_id: str
+    recipient_hint: str
+    subject: str
+    body: str
+    status: OutreachDraftStatus
+    generated_by: str
+    created_by: str
+    approved_by: str | None
+    sent_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ClearanceReportRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    project_id: str
+    report_type: str
+    status: ReportStatus
+    generated_by: str
+    content_markdown: str
     created_at: datetime

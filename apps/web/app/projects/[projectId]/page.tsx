@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { demoAssets, demoProjects } from "@/lib/demo-data";
+import { ReportButton } from "./report-button";
 import { ReviewQueue } from "./review-queue";
 import { UploadForm } from "./upload-form";
 
@@ -20,7 +21,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
       <main className="main">
         <header className="topbar"><div className="breadcrumbs"><Link href="/">Projects</Link><span>/</span><strong>{project.title}</strong></div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />Demo environment</div><button className="icon-button" aria-label="Notifications">◌</button></div></header>
         <div className="content">
-          <section className="project-header"><div><div className="eyebrow">Feature film · Review queue</div><h1>{project.title}</h1><p>Target release · 18 November 2026 &nbsp;·&nbsp; {project.distribution_modes.join(" + ")}</p></div><div className="header-actions"><button className="secondary-button">Export report</button><button className="primary-button">Start analysis</button></div></section>
+          <section className="project-header"><div><div className="eyebrow">Feature film · Review queue</div><h1>{project.title}</h1><p>Target release · 18 November 2026 &nbsp;·&nbsp; {project.distribution_modes.join(" + ")}</p></div><div className="header-actions"><ReportButton projectId={project.id} /><button className="primary-button">Start analysis</button></div></section>
           <UploadForm projectId={project.id} />
           <ReviewQueue projectId={project.id} />
           <div className="project-layout">

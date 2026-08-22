@@ -95,7 +95,18 @@ async def process_research_run(
     try:
         provider = make_research_provider(settings)
         provider_session_id = f"clearcut:{run_id}"
-        results = await provider.search(query, objective=objective, session_id=provider_session_id)
+        search_results = await provider.search(
+            query, objective=objective, session_id=provider_session_id
+        )
+        results = []
+        for result in search_results[:3]:
+            try:
+                extracted = await provider.extract(
+                    result.url, objective=objective, session_id=provider_session_id
+                )
+            except ParallelProviderError:
+                extracted = result
+            results.append(extracted if extracted.excerpt else result)
         with database.session_factory() as session:
             runs = ResearchRunRepository(session)
             sources = [
@@ -112,7 +123,7 @@ async def process_research_run(
             ]
             if sources:
                 runs.add_sources(sources)
-            request_id = results[0].request_id if results else None
+            request_id = search_results[0].request_id if search_results else None
             runs.update(
                 run_id, status="completed" if sources else "partial", provider_request_id=request_id
             )

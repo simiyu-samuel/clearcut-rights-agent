@@ -35,6 +35,13 @@ type SourceRecord = {
   source_quality: string;
 };
 
+type OutreachDraft = {
+  id: string;
+  subject: string;
+  body: string;
+  status: string;
+};
+
 const decisions = [
   { value: "approve_next_action", label: "Approve next action" },
   { value: "request_more_research", label: "Request more research" },
@@ -45,9 +52,11 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [cards, setCards] = useState<ClearanceCard[]>([]);
   const [sourcesByRun, setSourcesByRun] = useState<Record<string, SourceRecord[]>>({});
+  const [draftsByCard, setDraftsByCard] = useState<Record<string, OutreachDraft>>({});
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [busyCard, setBusyCard] = useState<string | null>(null);
+  const [draftingCard, setDraftingCard] = useState<string | null>(null);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -114,6 +123,28 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
     }
   }
 
+  async function createOutreachDraft(card: ClearanceCard) {
+    setDraftingCard(card.id);
+    setMessage("");
+    try {
+      const response = await fetch(`${apiUrl}/v1/assets/${card.asset_id}/outreach-drafts`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-organization-id": "demo-org", "x-actor-id": "demo-producer" },
+        body: JSON.stringify({ recipient_hint: "Rights and licensing contact" }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail ?? "Unable to draft the permission request.");
+      }
+      const draft: OutreachDraft = await response.json();
+      setDraftsByCard((current) => ({ ...current, [card.id]: draft }));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to draft the permission request.");
+    } finally {
+      setDraftingCard(null);
+    }
+  }
+
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
 
   return (
@@ -161,8 +192,27 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
                       {busyCard === card.id ? "Saving…" : decision.label}
                     </button>
                   ))}
+                  <button className="secondary-button" disabled={draftingCard === card.id} onClick={() => void createOutreachDraft(card)} type="button">
+                    {draftingCard === card.id ? "Drafting…" : "Draft permission request"}
+                  </button>
                 </div>
-              ) : <div className="review-complete">Decision recorded · {card.generated_by} card</div>}
+              ) : (
+                <>
+                  <div className="review-complete">Decision recorded · {card.generated_by} card</div>
+                  <div className="review-actions">
+                    <button className="secondary-button" disabled={draftingCard === card.id} onClick={() => void createOutreachDraft(card)} type="button">
+                      {draftingCard === card.id ? "Drafting…" : "Draft permission request"}
+                    </button>
+                  </div>
+                </>
+              )}
+              {draftsByCard[card.id] ? (
+                <details className="draft-preview" open>
+                  <summary>Permission request draft · {draftsByCard[card.id].status}</summary>
+                  <strong>{draftsByCard[card.id].subject}</strong>
+                  <pre>{draftsByCard[card.id].body}</pre>
+                </details>
+              ) : null}
             </article>
           );
         })}

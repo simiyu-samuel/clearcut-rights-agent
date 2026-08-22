@@ -170,3 +170,37 @@ class AuditEvent(Base):
     resource_id: Mapped[str] = mapped_column(String(36))
     metadata_json: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class OutreachDraft(Base):
+    __tablename__ = "outreach_drafts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    asset_id: Mapped[str] = mapped_column(String(36), index=True)
+    clearance_card_id: Mapped[str] = mapped_column(String(36), index=True)
+    recipient_hint: Mapped[str] = mapped_column(String(255))
+    subject: Mapped[str] = mapped_column(String(500))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="draft", index=True)
+    generated_by: Mapped[str] = mapped_column(String(80))
+    created_by: Mapped[str] = mapped_column(String(120))
+    approved_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class ClearanceReport(Base):
+    __tablename__ = "clearance_reports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    report_type: Mapped[str] = mapped_column(String(60), default="clearance_summary")
+    status: Mapped[str] = mapped_column(String(40), default="ready", index=True)
+    generated_by: Mapped[str] = mapped_column(String(80))
+    content_markdown: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

@@ -108,3 +108,31 @@ export type ApprovalResponse = {
   supersedes_id: string | null;
   created_at: string;
 };
+
+export type OutreachDraftResponse = {
+  id: string;
+  organization_id: string;
+  asset_id: string;
+  clearance_card_id: string;
+  recipient_hint: string;
+  subject: string;
+  body: string;
+  status: "draft" | "approved" | "sent" | "cancelled";
+  generated_by: string;
+  created_by: string;
+  approved_by: string | null;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ClearanceReportResponse = {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  report_type: string;
+  status: "ready" | "failed";
+  generated_by: string;
+  content_markdown: string;
+  created_at: string;
+};

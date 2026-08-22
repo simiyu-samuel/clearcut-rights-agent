@@ -101,6 +101,8 @@ button { font: inherit; }
 .project-header h1 { font-size: 38px; letter-spacing: -0.06em; margin: 10px 0 8px; }
 .project-header p { color: var(--muted); font-size: 13px; margin: 0; }
 .header-actions { display: flex; gap: 10px; }
+.report-action { align-items: center; display: flex; gap: 8px; }
+.report-action span { color: var(--green); font-size: 10px; }
 .upload-panel { align-items: center; background: rgba(228, 184, 106, 0.045); border: 1px dashed rgba(228, 184, 106, 0.34); border-radius: 7px; display: flex; gap: 22px; justify-content: space-between; margin: -8px 0 28px; padding: 16px 18px; }
 .upload-title { font-size: 12px; font-weight: 600; }
 .upload-copy { color: var(--muted); font-size: 11px; margin-top: 5px; }
@@ -142,6 +144,10 @@ button { font: inherit; }
 .review-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
 .review-actions button { font-size: 10px; padding: 9px 10px; }
 .review-complete { color: var(--green); font-size: 10px; margin-top: 18px; }
+.draft-preview { background: rgba(255, 255, 255, 0.025); border: 1px solid var(--line); margin-top: 16px; padding: 11px 12px; }
+.draft-preview summary { color: var(--gold); cursor: pointer; font-size: 10px; }
+.draft-preview strong { display: block; font-size: 11px; margin-top: 12px; }
+.draft-preview pre { color: var(--muted); font-family: Arial, Helvetica, sans-serif; font-size: 10px; line-height: 1.55; margin: 10px 0 0; white-space: pre-wrap; }
 .project-layout { display: grid; gap: 28px; grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.75fr); }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; }
 .panel-header { align-items: center; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; padding: 16px 18px; }
