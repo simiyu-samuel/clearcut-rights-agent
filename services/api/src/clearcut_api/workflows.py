@@ -16,7 +16,7 @@ from .repositories import (
     JobRepository,
     ResearchRunRepository,
 )
-from .storage import LocalObjectStore
+from .storage import ObjectStore
 
 
 def make_research_provider(settings: Settings) -> ResearchProvider:
@@ -31,7 +31,7 @@ def make_research_provider(settings: Settings) -> ResearchProvider:
 
 def process_document_analysis(
     database: Database,
-    storage: LocalObjectStore,
+    storage: ObjectStore,
     job_id: str,
     document_id: str,
     organization_id: str,

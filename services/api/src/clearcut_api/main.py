@@ -61,7 +61,7 @@ from .schemas import (
     ResearchRunRead,
     SourceRecordRead,
 )
-from .storage import LocalObjectStore
+from .storage import ObjectStore, create_object_store
 from .workflows import process_document_analysis, process_research_run
 
 ALLOWED_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
@@ -69,10 +69,10 @@ ALLOWED_TEXT_MIME_TYPES = {"text/plain", "text/markdown", "application/octet-str
 
 
 def create_app(
-    database: Database | None = None, storage: LocalObjectStore | None = None
+    database: Database | None = None, storage: ObjectStore | None = None
 ) -> FastAPI:
-    db = database or create_database(settings.database_url)
-    object_store = storage or LocalObjectStore(settings.storage_root)
+    db = database or create_database(settings.resolved_database_url())
+    object_store = storage or create_object_store(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
