@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "ClearCut rights-clearance API and agent foundation"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.14,<2.0",
   "fastapi>=0.115,<1.0",
   "google-cloud-storage>=2.18,<4.0",
   "httpx>=0.27,<1.0",

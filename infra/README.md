@@ -39,3 +39,13 @@ Cloud Run will provide these values at deploy time:
 - `GOOGLE_CLOUD_LOCATION=us-central1`.
 
 The `clearcut-runtime` service account must remain the runtime identity. No service-account key files belong in the repository or deployment environment.
+
+## Database migrations
+
+The schema is versioned with Alembic. Run migrations only against an explicitly selected environment:
+
+```bash
+alembic -c services/api/alembic.ini upgrade head
+```
+
+The command reads the effective database configuration from the environment, including the Cloud SQL Unix-socket settings used by Cloud Run.

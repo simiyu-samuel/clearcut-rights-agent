@@ -38,12 +38,15 @@ pip install -e 'services/api[dev,agent]'
 - permission-request drafts that are reviewable but never sent automatically;
 - Markdown clearance report generation with source citations;
 - SQLAlchemy persistence with SQLite development default;
+- Alembic migration history for the managed PostgreSQL schema;
 - typed provider protocol and deterministic Parallel fixture provider;
 - tests for health, tenant isolation, extraction, analysis, and provider normalization.
 
 Set `PARALLEL_MODE=live` and provide `PARALLEL_API_KEY` to use the documented Parallel v1 Search/Extract API adapter. Fixture mode is the default for local development and demo resilience.
 
 Set `AGENT_MODE=vertex`, `GOOGLE_CLOUD_PROJECT`, and application-default Google Cloud credentials to use the Vertex Gemini agent. `AGENT_MODE=fixture` is the default and is intentionally deterministic. Clearance cards always remain human-reviewable; they are workflow triage, not legal advice or a legal-clearance declaration.
+
+For a managed PostgreSQL deployment, set `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`, and `CLOUD_SQL_CONNECTION_NAME`; the API builds the Cloud SQL Unix-socket URL automatically. Set `STORAGE_BACKEND=gcs` and `GCS_BUCKET_NAME` to use Google Cloud Storage instead of the local filesystem.
 
 The registered tool functions are provider-backed but persistence-safe: `request_human_approval` creates a review intent only. The authenticated API approval endpoint remains the only path that changes clearance workflow state.
 
