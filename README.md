@@ -8,7 +8,7 @@ ClearCut turns a screenplay, shot list, or rough cut into a structured rights-cl
 
 ## Project status
 
-This repository is in the pre-build planning phase for the Agentic Cinema hackathon. The initial release will target a credible end-to-end vertical slice; the architecture and backlog are intentionally designed to grow into a production-grade, multi-tenant workspace.
+This repository has a working fixture-mode vertical slice for the Agentic Cinema hackathon. Live Google Cloud and Parallel credentials are the next setup gate; the architecture and backlog are intentionally designed to grow into a production-grade, multi-tenant workspace.
 
 The implementation foundation is now in progress. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and [docs/06-roadmap.md](docs/06-roadmap.md) for the delivery sequence.
 
@@ -44,6 +44,7 @@ Clearance report + outreach actions
 - [Repository standards](docs/08-repository-standards.md)
 - [Open questions and decisions](docs/09-open-questions.md)
 - [Partner-track decision](docs/decisions/0001-partner-track.md)
+- [Tooling, accounts, and credential readiness report](docs/10-tooling-and-credentials-report.md)
 
 ## License
 
