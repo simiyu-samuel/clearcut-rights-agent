@@ -1,0 +1,43 @@
+# Local Git metadata used because the desktop workspace exposes a read-only .git mount.
+.clearcut-git/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# JavaScript / TypeScript
+node_modules/
+.next/
+out/
+dist/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE and OS files
+.DS_Store
+.idea/
+.vscode/settings.json
+*.swp
+
+# Generated artifacts
+tmp/
+artifacts/
+uploads/
+reports/
+*.log
+
