@@ -117,6 +117,7 @@ class SourceRecord(Base):
     title: Mapped[str] = mapped_column(String(500))
     excerpt: Mapped[str] = mapped_column(Text)
     source_quality: Mapped[str] = mapped_column(String(40))
+    provider_session_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

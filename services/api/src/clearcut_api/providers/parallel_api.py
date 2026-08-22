@@ -37,10 +37,15 @@ class ParallelApiProvider:
                 "parallel_request_failed", "Parallel request failed"
             ) from exc
 
-    async def search(self, query: str, *, objective: str) -> list[SourceResult]:
+    async def search(
+        self, query: str, *, objective: str, session_id: str | None = None
+    ) -> list[SourceResult]:
         payload = {"search_queries": [query], "objective": objective, "max_chars_total": 12000}
+        if session_id:
+            payload["session_id"] = session_id
         response = await self._post("/v1/search", payload)
         request_id = response.get("search_id")
+        response_session_id = response.get("session_id") or session_id
         retrieved_at = datetime.now(UTC)
         return [
             SourceResult(
@@ -50,15 +55,19 @@ class ParallelApiProvider:
                 retrieved_at=retrieved_at,
                 source_quality="parallel_search",
                 request_id=request_id,
+                session_id=response_session_id,
             )
             for result in response.get("results", [])
             if result.get("url")
         ]
 
-    async def extract(self, url: str, *, objective: str) -> SourceResult:
-        response = await self._post(
-            "/v1/extract", {"urls": [url], "objective": objective, "max_chars_total": 12000}
-        )
+    async def extract(
+        self, url: str, *, objective: str, session_id: str | None = None
+    ) -> SourceResult:
+        payload = {"urls": [url], "objective": objective, "max_chars_total": 12000}
+        if session_id:
+            payload["session_id"] = session_id
+        response = await self._post("/v1/extract", payload)
         result = (response.get("results") or [{}])[0]
         excerpt = "\n\n".join(result.get("excerpts") or [])
         if result.get("full_content"):
@@ -70,4 +79,5 @@ class ParallelApiProvider:
             retrieved_at=datetime.now(UTC),
             source_quality="parallel_extract",
             request_id=response.get("extract_id"),
+            session_id=response.get("session_id") or session_id,
         )

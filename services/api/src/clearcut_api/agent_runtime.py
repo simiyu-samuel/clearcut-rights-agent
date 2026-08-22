@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from .config import Settings
 from .models import Asset, SourceRecord
+from .risk_policy import calculate_confidence, calculate_risk
 
 
 class AgentRuntimeError(RuntimeError):
@@ -34,57 +35,21 @@ class ClearanceAgent(Protocol):
 class FixtureClearanceAgent:
     """Deterministic policy-aware output for local development and judging demos."""
 
-    _GUIDANCE = {
-        "music": (
-            90,
-            "music_rights_required",
-            "Request a synchronization/music license and confirm territory, term, media, and usage scope.",
-        ),
-        "brand": (
-            65,
-            "trademark_usage_review",
-            "Confirm trademark or appearance permission and document the intended commercial context.",
-        ),
-        "location": (
-            55,
-            "location_release_required",
-            "Confirm the filming permit and location release for the territory and production dates.",
-        ),
-        "artwork": (
-            60,
-            "artwork_license_review",
-            "Confirm an artwork license or replace the asset with a production-cleared alternative.",
-        ),
-        "organization": (
-            50,
-            "name_or_logo_review",
-            "Confirm name/logo/reference usage and retain the supporting permission or editorial rationale.",
-        ),
-    }
-
     async def create_clearance_card(
         self, asset: Asset, sources: list[SourceRecord]
     ) -> ClearanceAgentOutput:
-        risk_score, reason_code, recommendation = self._GUIDANCE.get(
-            asset.category,
-            (
-                50,
-                "category_specific_review",
-                "Confirm the rights position with the relevant rights holder.",
-            ),
-        )
         evidence_count = len(sources)
-        confidence = min(0.95, 0.35 + (0.2 * evidence_count)) if evidence_count else 0.2
+        risk = calculate_risk(asset.category, evidence_count, asset.reason_codes)
         return ClearanceAgentOutput(
             summary=(
                 f"{asset.canonical_name} is a {asset.category} asset identified in "
                 f"scene {asset.scene_reference or 'not specified'}. "
                 f"The research run produced {evidence_count} evidence source(s)."
             ),
-            recommendation=recommendation,
-            risk_score=risk_score,
-            confidence_score=confidence,
-            reason_codes=[reason_code, *asset.reason_codes],
+            recommendation=risk.recommendation,
+            risk_score=risk.risk_score,
+            confidence_score=calculate_confidence(evidence_count),
+            reason_codes=risk.reason_codes,
             needs_human_review=True,
             generated_by="fixture",
             model_name=None,

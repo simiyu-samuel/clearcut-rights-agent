@@ -35,7 +35,7 @@ The current repository already has a working fixture-mode vertical slice. It can
 | Asset extraction | Deterministic scene-aware extractor | Implemented | `services/api/src/clearcut_api/extraction.py` |
 | Partner research | Typed Parallel adapter | Implemented; fixture by default | `services/api/src/clearcut_api/providers/parallel_api.py` |
 | Gemini reasoning | Google Gen AI SDK Vertex path | Implemented as optional runtime path | `services/api/src/clearcut_api/agent_runtime.py` |
-| ADK / Agent Builder path | Optional root-agent scaffold | Scaffolded, not deployed | `services/api/src/clearcut_api/adk_agent.py` |
+| ADK / Agent Builder path | Registered root-agent tools + Agent Engine wrapper | Scaffolded, not deployed | `services/api/src/clearcut_api/adk_agent.py`, `agent_tools.py` |
 | Review safety | Clearance cards, approval decisions, audit events | Implemented | `models.py`, `main.py`, review queue UI |
 | Cloud deployment | Cloud Run / Agent Engine | Not implemented yet | Next infrastructure milestone |
 
@@ -49,7 +49,7 @@ What is not done yet:
 
 - no Google Cloud project is connected to the application;
 - no live Gemini request has been run from this repository;
-- no ADK tools have been registered for the hosted agent;
+- registered ADK tools exist, but they are not yet deployed or connected to a hosted Agent Engine runtime;
 - no Agent Engine resource has been deployed.
 
 ### Phase 2 — Action mechanisms and data connectivity
@@ -91,7 +91,8 @@ We have the beginnings of this phase:
 
 Still required for the full phase:
 
-- registered ADK tools such as `search_rights_sources`, `extract_rights_source`, `save_research_evidence`, and `request_human_approval`;
+- persistence-aware multi-step orchestration around the registered tools;
+- an evidence-save tool that writes through the authenticated application workflow;
 - `AdkApp` packaging and Agent Engine deployment;
 - retryable Cloud Tasks or equivalent worker execution;
 - production PostgreSQL and object storage;
@@ -217,7 +218,7 @@ The last two values remain local-development defaults. For staging/production th
 2. Enable Vertex AI API and complete local ADC authentication.
 3. Create the Parallel account and API key.
 4. Put the values into a local ignored `.env` file; do not send the secret values in chat.
-5. We install the hosted Agent Engine dependencies and register the ClearCut ADK tools.
+5. We install the hosted Agent Engine dependencies and connect the registered ClearCut ADK tools to the persistence-aware workflow.
 6. We run a live Gemini + Parallel smoke test while retaining fixture fallback.
 7. We provision Cloud Storage, Cloud SQL, Secret Manager, Cloud Run, and a staging service account.
 8. We deploy the full workflow and run the production-shaped demo.

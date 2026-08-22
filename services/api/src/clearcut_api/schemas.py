@@ -114,6 +114,7 @@ class SourceRecordRead(BaseModel):
     title: str
     excerpt: str
     source_quality: str
+    provider_session_id: str | None
     retrieved_at: datetime
 
 

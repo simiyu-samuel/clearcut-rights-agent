@@ -11,9 +11,14 @@ class SourceResult:
     retrieved_at: datetime
     source_quality: str
     request_id: str | None = None
+    session_id: str | None = None
 
 
 class ResearchProvider(Protocol):
-    async def search(self, query: str, *, objective: str) -> list[SourceResult]: ...
+    async def search(
+        self, query: str, *, objective: str, session_id: str | None = None
+    ) -> list[SourceResult]: ...
 
-    async def extract(self, url: str, *, objective: str) -> SourceResult: ...
+    async def extract(
+        self, url: str, *, objective: str, session_id: str | None = None
+    ) -> SourceResult: ...

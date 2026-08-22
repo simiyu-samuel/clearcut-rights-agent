@@ -1,3 +1,4 @@
+from .agent_tools import REGISTERED_AGENT_TOOLS
 from .config import Settings, settings
 
 
@@ -23,4 +24,16 @@ def build_root_agent(agent_settings: Settings | None = None):
             "application tools and supplied evidence. Produce structured research context "
             "for human review, never legal advice, and never claim that an asset is legally cleared."
         ),
+        tools=REGISTERED_AGENT_TOOLS,
     )
+
+
+def build_agent_engine_app(agent_settings: Settings | None = None):
+    """Wrap the ADK root agent for deployment to Vertex AI Agent Engine."""
+    try:
+        from vertexai.agent_engines import AdkApp
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install the optional agent extra to package an Agent Engine application"
+        ) from exc
+    return AdkApp(agent=build_root_agent(agent_settings))

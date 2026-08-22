@@ -2,6 +2,13 @@ import asyncio
 from datetime import UTC
 
 from clearcut_api.agent_runtime import FixtureClearanceAgent
+from clearcut_api.agent_tools import (
+    REGISTERED_AGENT_TOOLS,
+    calculate_clearance_risk,
+    extract_rights_source,
+    request_human_approval,
+    search_rights_sources,
+)
 from clearcut_api.config import Settings
 from clearcut_api.extraction import extract_candidate_assets
 from clearcut_api.models import Asset, Document, Job, Project, ResearchRun, SourceRecord
@@ -139,6 +146,27 @@ def test_fixture_clearance_agent_requires_human_review() -> None:
     assert output.risk_score == 90
     assert output.needs_human_review is True
     assert "music_rights_required" in output.reason_codes
+
+
+def test_registered_agent_tools_use_fixture_provider_and_preserve_review_boundary() -> None:
+    search_result = asyncio.run(
+        search_rights_sources("Midnight City licensing", "Find the rights owner.", "run-1")
+    )
+    extract_result = asyncio.run(
+        extract_rights_source("https://example.com/rights", "Extract licensing evidence.", "run-1")
+    )
+    risk_result = calculate_clearance_risk("music", 1, ["music_identified"])
+    approval_result = request_human_approval(
+        "asset-1", risk_result["recommendation"], risk_result["reason_codes"]
+    )
+
+    assert len(REGISTERED_AGENT_TOOLS) == 4
+    assert search_result["status"] == "completed"
+    assert search_result["sources"][0]["session_id"] == "run-1"
+    assert extract_result["status"] == "completed"
+    assert risk_result["needs_human_review"] is True
+    assert approval_result["status"] == "pending_review"
+    assert approval_result["requires_human_action"] is True
 
 
 def test_research_run_creates_evidence_backed_clearance_card() -> None:

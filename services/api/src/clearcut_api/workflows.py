@@ -94,7 +94,8 @@ async def process_research_run(
 
     try:
         provider = make_research_provider(settings)
-        results = await provider.search(query, objective=objective)
+        provider_session_id = f"clearcut:{run_id}"
+        results = await provider.search(query, objective=objective, session_id=provider_session_id)
         with database.session_factory() as session:
             runs = ResearchRunRepository(session)
             sources = [
@@ -104,6 +105,7 @@ async def process_research_run(
                     title=result.title,
                     excerpt=result.excerpt,
                     source_quality=result.source_quality,
+                    provider_session_id=result.session_id,
                     retrieved_at=result.retrieved_at,
                 )
                 for result in results
