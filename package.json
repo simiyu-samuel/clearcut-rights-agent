@@ -1,0 +1,18 @@
+{
+  "name": "clearcut-rights-agent",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "web:dev": "npm --workspace apps/web run dev",
+    "web:build": "npm --workspace apps/web run build",
+    "web:lint": "npm --workspace apps/web run lint",
+    "contracts:check": "npm --workspace packages/contracts run typecheck",
+    "api:dev": "uvicorn clearcut_api.main:app --app-dir services/api/src --reload",
+    "api:test": "pytest services/api/tests",
+    "api:format": "ruff format services/api/src services/api/tests",
+    "api:lint": "ruff check services/api/src services/api/tests"
+  }
+}

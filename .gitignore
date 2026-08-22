@@ -40,4 +40,5 @@ artifacts/
 uploads/
 reports/
 *.log
-
+.data/
+*.db

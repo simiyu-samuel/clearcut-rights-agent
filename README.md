@@ -10,6 +10,8 @@ ClearCut turns a screenplay, shot list, or rough cut into a structured rights-cl
 
 This repository is in the pre-build planning phase for the Agentic Cinema hackathon. The initial release will target a credible end-to-end vertical slice; the architecture and backlog are intentionally designed to grow into a production-grade, multi-tenant workspace.
 
+The implementation foundation is now in progress. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and [docs/06-roadmap.md](docs/06-roadmap.md) for the delivery sequence.
+
 ## Primary partner track
 
 **Parallel** — used for web search, content extraction, deep research, and monitoring of rights-related sources. See the [partner-track decision record](docs/decisions/0001-partner-track.md).
