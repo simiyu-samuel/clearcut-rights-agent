@@ -7,6 +7,7 @@ The API is the server-side foundation for projects, analysis jobs, typed provide
 From the repository root:
 
 ```bash
+cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e 'services/api[dev]'

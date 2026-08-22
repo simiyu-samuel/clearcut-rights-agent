@@ -210,6 +210,12 @@ DATABASE_URL=sqlite:///./.data/clearcut.db
 STORAGE_ROOT=.data/uploads
 ```
 
+For the web app, keep the browser-safe API URL in `apps/web/.env.local`:
+
+```dotenv
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
 The last two values remain local-development defaults. For staging/production they will become Cloud SQL and Cloud Storage configuration, with credentials supplied through Google Cloud identity and Secret Manager.
 
 ## 5. Exact order of setup
@@ -217,7 +223,7 @@ The last two values remain local-development defaults. For staging/production th
 1. Create or select the Google Cloud project and attach billing/credits.
 2. Enable Vertex AI API and complete local ADC authentication.
 3. Create the Parallel account and API key.
-4. Put the values into a local ignored `.env` file; do not send the secret values in chat.
+4. Put the values into the ignored root `.env` file; the API loads it automatically in local development. Do not send the secret values in chat.
 5. We install the hosted Agent Engine dependencies and connect the registered ClearCut ADK tools to the persistence-aware workflow.
 6. We run a live Gemini + Parallel smoke test while retaining fixture fallback.
 7. We provision Cloud Storage, Cloud SQL, Secret Manager, Cloud Run, and a staging service account.
