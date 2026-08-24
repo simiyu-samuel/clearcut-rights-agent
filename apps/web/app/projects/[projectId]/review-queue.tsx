@@ -57,6 +57,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
   const [message, setMessage] = useState("");
   const [busyCard, setBusyCard] = useState<string | null>(null);
   const [draftingCard, setDraftingCard] = useState<string | null>(null);
+  const [researchingAsset, setResearchingAsset] = useState<string | null>(null);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -145,7 +146,44 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
     }
   }
 
+  async function startResearch(asset: Asset) {
+    setResearchingAsset(asset.id);
+    setMessage("");
+    try {
+      const response = await fetch(`${apiUrl}/v1/assets/${asset.id}/research-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-organization-id": "demo-org" },
+        body: JSON.stringify({
+          query: `${asset.canonical_name} ${asset.category} licensing rights holder`,
+          objective: `Identify rights holders, licensing requirements, and reliable evidence for clearing "${asset.canonical_name}" for film and television use.`,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail ?? "Unable to start research.");
+      }
+      const run = await response.json() as { id: string };
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        const statusResponse = await fetch(`${apiUrl}/v1/research-runs/${run.id}`, { headers: { "x-organization-id": "demo-org" } });
+        if (!statusResponse.ok) throw new Error("Unable to read research status.");
+        const status = await statusResponse.json() as { status: string; error_code?: string | null };
+        if (status.status === "completed" || status.status === "partial") {
+          await loadQueue();
+          return;
+        }
+        if (status.status === "failed") throw new Error(status.error_code ?? "Research failed.");
+      }
+      throw new Error("Research is taking longer than expected. Refresh this project shortly.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to start research.");
+    } finally {
+      setResearchingAsset(null);
+    }
+  }
+
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+  const assetsWithoutCards = assets.filter((asset) => !latestCards.some((card) => card.asset_id === asset.id));
 
   return (
     <section className="review-panel panel">
@@ -157,8 +195,20 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
         <span>{loading ? "Loading" : `${latestCards.length} cards`}</span>
       </div>
       {message ? <div className="review-message" role="status">{message}</div> : null}
-      {!loading && !message && latestCards.length === 0 ? (
-        <div className="review-empty">Run research on an extracted asset to create its first clearance card.</div>
+      {!loading && !message && latestCards.length === 0 && assetsWithoutCards.length === 0 ? (
+        <div className="review-empty">Upload a screenplay, start analysis, and extract assets to begin review.</div>
+      ) : null}
+      {!loading && !message && assetsWithoutCards.length > 0 ? (
+        <div className="asset-research-list">
+          {assetsWithoutCards.map((asset) => (
+            <div className="asset-research-row" key={asset.id}>
+              <div><strong>{asset.canonical_name}</strong><span>{asset.category} · {asset.risk_status.replaceAll("_", " ")}</span><p>{asset.context}</p></div>
+              <button className="secondary-button" disabled={researchingAsset === asset.id} onClick={() => void startResearch(asset)} type="button">
+                {researchingAsset === asset.id ? "Researching…" : "Research asset"}
+              </button>
+            </div>
+          ))}
+        </div>
       ) : null}
       <div className="clearance-grid">
         {latestCards.map((card) => {

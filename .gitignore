@@ -39,7 +39,9 @@ venv/
 tmp/
 artifacts/
 uploads/
-reports/
+# Keep the application route at apps/web/app/reports tracked and included in builds.
+# Generated report artifacts should use a more specific directory name.
+report-artifacts/
 *.log
 .data/
 *.db

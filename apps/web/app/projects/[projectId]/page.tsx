@@ -28,7 +28,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
       <main className="main">
         <header className="topbar"><div className="breadcrumbs"><Link href="/">Projects</Link><span>/</span><strong>{project.title}</strong></div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />Staging environment</div><button className="icon-button" aria-label="Notifications">◌</button></div></header>
         <div className="content">
-          <section className="project-header"><div><div className="eyebrow">{project.project_type} · Review queue</div><h1>{project.title}</h1><p>Target release · {targetRelease} &nbsp;·&nbsp; {project.distribution_modes.join(" + ") || "Distribution plan not set"}</p></div><div className="header-actions"><ReportButton projectId={project.id} /><button className="primary-button">Start analysis</button></div></section>
+          <section className="project-header"><div><div className="eyebrow">{project.project_type} · Review queue</div><h1>{project.title}</h1><p>Target release · {targetRelease} &nbsp;·&nbsp; {project.distribution_modes.join(" + ") || "Distribution plan not set"}</p></div><div className="header-actions"><ReportButton projectId={project.id} /></div></section>
           <UploadForm projectId={project.id} />
           <ReviewQueue projectId={project.id} />
           <div className="project-layout">

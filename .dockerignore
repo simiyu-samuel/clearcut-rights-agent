@@ -17,5 +17,6 @@ __pycache__/
 tmp/
 artifacts/
 uploads/
-reports/
+# Generated report artifacts use a dedicated directory; apps/web/app/reports is a route.
+report-artifacts/
 *.log
