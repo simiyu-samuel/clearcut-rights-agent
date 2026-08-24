@@ -186,7 +186,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
   const assetsWithoutCards = assets.filter((asset) => !latestCards.some((card) => card.asset_id === asset.id));
 
   return (
-    <section className="review-panel panel">
+    <section className="review-panel panel" id="review-queue">
       <div className="panel-header">
         <div>
           <h2>AI clearance cards</h2>
