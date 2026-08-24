@@ -1,4 +1,4 @@
-import type { Project } from "./types";
+import type { ClearanceReport, Project } from "./types";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const organizationHeaders = { "x-organization-id": "demo-org" };
@@ -27,4 +27,12 @@ export async function fetchProject(projectId: string): Promise<Project | null> {
     throw new Error(`Unable to load project (${response.status})`);
   }
   return response.json() as Promise<Project>;
+}
+
+export async function fetchReports(projectId: string): Promise<ClearanceReport[]> {
+  const response = await request(`/v1/projects/${encodeURIComponent(projectId)}/reports`);
+  if (!response.ok) {
+    throw new Error(`Unable to load reports (${response.status})`);
+  }
+  return response.json() as Promise<ClearanceReport[]>;
 }

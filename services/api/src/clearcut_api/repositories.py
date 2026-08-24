@@ -32,13 +32,54 @@ class ProjectRepository:
             .where(Project.organization_id == organization_id)
             .order_by(Project.updated_at.desc())
         )
-        return list(self.session.scalars(statement))
+        projects = list(self.session.scalars(statement))
+        return [self.sync_status(project) for project in projects]
 
     def get(self, project_id: str, organization_id: str) -> Project | None:
         statement = select(Project).where(
             Project.id == project_id, Project.organization_id == organization_id
         )
-        return self.session.scalar(statement)
+        project = self.session.scalar(statement)
+        return self.sync_status(project) if project is not None else None
+
+    def sync_status(self, project: Project) -> Project:
+        asset_ids = set(
+            self.session.scalars(
+                select(Asset.id).where(
+                    Asset.project_id == project.id,
+                    Asset.organization_id == project.organization_id,
+                )
+            )
+        )
+        cards = list(
+            self.session.scalars(
+                select(ClearanceCard)
+                .join(Asset, Asset.id == ClearanceCard.asset_id)
+                .where(
+                    Asset.project_id == project.id,
+                    ClearanceCard.organization_id == project.organization_id,
+                )
+                .order_by(ClearanceCard.created_at.desc())
+            )
+        )
+        latest_cards: dict[str, ClearanceCard] = {}
+        for card in cards:
+            latest_cards.setdefault(card.asset_id, card)
+
+        if not asset_ids:
+            desired_status = "draft"
+        elif len(latest_cards) < len(asset_ids):
+            desired_status = "active"
+        elif all(card.status == "approved" for card in latest_cards.values()):
+            desired_status = "complete"
+        else:
+            desired_status = "review"
+
+        if project.status != desired_status:
+            project.status = desired_status
+            self.session.commit()
+            self.session.refresh(project)
+        return project
 
 
 class JobRepository:
@@ -293,3 +334,14 @@ class ClearanceReportRepository:
             ClearanceReport.organization_id == organization_id,
         )
         return self.session.scalar(statement)
+
+    def list_for_project(self, project_id: str, organization_id: str) -> list[ClearanceReport]:
+        statement = (
+            select(ClearanceReport)
+            .where(
+                ClearanceReport.project_id == project_id,
+                ClearanceReport.organization_id == organization_id,
+            )
+            .order_by(ClearanceReport.created_at.desc())
+        )
+        return list(self.session.scalars(statement))

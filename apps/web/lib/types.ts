@@ -13,6 +13,17 @@ export type Project = {
   updated_at: string;
 };
 
+export type ClearanceReport = {
+  id: string;
+  organization_id: string;
+  project_id: string;
+  report_type: string;
+  status: "ready" | "failed";
+  generated_by: string;
+  content_markdown: string;
+  created_at: string;
+};
+
 export type AssetRisk = "high" | "medium" | "low";
 
 export type DemoAsset = {

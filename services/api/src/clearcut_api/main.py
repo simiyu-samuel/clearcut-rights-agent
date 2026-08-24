@@ -12,6 +12,7 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
+    Response,
     UploadFile,
     status,
 )
@@ -32,6 +33,7 @@ from .models import (
     ResearchRun,
 )
 from .outreach import build_outreach_draft
+from .pdf import build_pdf
 from .reporting import build_clearance_report
 from .repositories import (
     ApprovalRepository,
@@ -520,6 +522,19 @@ def create_app(
         return report
 
     @app.get(
+        "/v1/projects/{project_id}/reports",
+        response_model=list[ClearanceReportRead],
+        tags=["reports"],
+    )
+    def list_reports(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[ClearanceReport]:
+        require_project(session, project_id, organization_id)
+        return ClearanceReportRepository(session).list_for_project(project_id, organization_id)
+
+    @app.get(
         "/v1/projects/{project_id}/reports/{report_id}",
         response_model=ClearanceReportRead,
         tags=["reports"],
@@ -535,6 +550,29 @@ def create_app(
         if report is None:
             raise HTTPException(status_code=404, detail="report_not_found")
         return report
+
+    @app.get(
+        "/v1/projects/{project_id}/reports/{report_id}/pdf",
+        response_class=Response,
+        responses={200: {"content": {"application/pdf": {}}}},
+        tags=["reports"],
+    )
+    def download_report_pdf(
+        project_id: str,
+        report_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Response:
+        require_project(session, project_id, organization_id)
+        report = ClearanceReportRepository(session).get(report_id, project_id, organization_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report_not_found")
+        filename = f"clearcut-{project_id}-report.pdf"
+        return Response(
+            content=build_pdf(report.content_markdown),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @app.get("/", include_in_schema=False)
     def root(request: Request) -> dict[str, str]:

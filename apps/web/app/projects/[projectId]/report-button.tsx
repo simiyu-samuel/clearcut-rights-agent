@@ -1,12 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import type { Route } from "next";
+import { useEffect, useState } from "react";
 
 export function ReportButton({ projectId }: { projectId: string }) {
+  const [hasReport, setHasReport] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function downloadReport() {
+  useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    void fetch(`${apiUrl}/v1/projects/${projectId}/reports`, { headers: { "x-organization-id": "demo-org" } })
+      .then((response) => (response.ok ? response.json() : []))
+      .then((reports: Array<{ id: string }>) => setHasReport(reports.length > 0))
+      .catch(() => setHasReport(false));
+  }, [projectId]);
+
+  async function generateReport() {
     setBusy(true);
     setMessage("");
     try {
@@ -19,13 +30,8 @@ export function ReportButton({ projectId }: { projectId: string }) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.detail ?? "Unable to generate the report.");
       }
-      const report = await response.json();
-      const download = document.createElement("a");
-      download.href = URL.createObjectURL(new Blob([report.content_markdown], { type: "text/markdown" }));
-      download.download = `clearcut-${projectId}-report.md`;
-      download.click();
-      URL.revokeObjectURL(download.href);
-      setMessage("Report downloaded.");
+      setHasReport(true);
+      setMessage("Report ready.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to generate the report.");
     } finally {
@@ -35,9 +41,10 @@ export function ReportButton({ projectId }: { projectId: string }) {
 
   return (
     <div className="report-action">
-      <button className="secondary-button" disabled={busy} onClick={() => void downloadReport()} type="button">
-        {busy ? "Generating…" : "Export report"}
+      <button className="secondary-button" disabled={busy} onClick={() => void generateReport()} type="button">
+        {busy ? "Generating…" : hasReport ? "Regenerate report" : "Generate report"}
       </button>
+      {hasReport ? <Link className="secondary-button" href={`/reports/${projectId}` as Route}>View report</Link> : null}
       {message ? <span role="status">{message}</span> : null}
     </div>
   );
