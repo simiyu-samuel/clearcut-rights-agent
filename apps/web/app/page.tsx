@@ -54,12 +54,12 @@ export default async function HomePage() {
 
           <section>
             <div className="section-heading"><h2>Workspace overview</h2><span className="card-meta">Last 30 days</span></div>
-            <div className="stats-grid">
+            {overview ? <div className="stats-grid">
               <div className="stat-card"><div className="stat-label">Assets reviewed</div><div className="stat-value">{overview.assets_reviewed}</div><div className="stat-note">Across {overview.project_count} {overview.project_count === 1 ? "project" : "projects"}</div></div>
               <div className="stat-card"><div className="stat-label">Need attention</div><div className="stat-value" style={{ color: "var(--gold)" }}>{overview.assets_need_attention}</div><div className="stat-note">{overview.high_priority_items} high-priority {overview.high_priority_items === 1 ? "item" : "items"}</div></div>
               <div className="stat-card"><div className="stat-label">Evidence coverage</div><div className="stat-value" style={{ color: "var(--green)" }}>{overview.evidence_coverage}%</div><div className="stat-note">Assets with evidence-backed cards</div></div>
               <div className="stat-card"><div className="stat-label">Research runs</div><div className="stat-value">{overview.research_runs}</div><div className="stat-note">{overview.parallel_sources} Parallel-backed sources</div></div>
-            </div>
+            </div> : <div className="overview-unavailable">Live workspace metrics are temporarily unavailable. Project data is still available; refresh after the API deployment completes.</div>}
           </section>
         </div>
       </main>

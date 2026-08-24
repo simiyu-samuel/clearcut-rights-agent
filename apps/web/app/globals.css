@@ -95,6 +95,7 @@ button { font: inherit; }
 .risk-count { color: var(--red); font-size: 12px; }
 
 .stats-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); }
+.overview-unavailable { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 12px; padding: 18px; }
 .stat-card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 17px; }
 .stat-label { color: var(--subtle); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
 .stat-value { font-size: 26px; letter-spacing: -0.06em; margin-top: 13px; }

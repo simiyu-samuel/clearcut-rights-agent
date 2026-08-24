@@ -37,10 +37,16 @@ export async function fetchReports(projectId: string): Promise<ClearanceReport[]
   return response.json() as Promise<ClearanceReport[]>;
 }
 
-export async function fetchWorkspaceOverview(): Promise<WorkspaceOverview> {
-  const response = await request("/v1/workspace/overview");
-  if (!response.ok) {
-    throw new Error(`Unable to load workspace overview (${response.status})`);
+export async function fetchWorkspaceOverview(): Promise<WorkspaceOverview | null> {
+  try {
+    const response = await request("/v1/workspace/overview");
+    if (!response.ok) {
+      console.error(`Unable to load workspace overview (${response.status})`);
+      return null;
+    }
+    return await response.json() as WorkspaceOverview;
+  } catch (error) {
+    console.error("Unable to load workspace overview", error);
+    return null;
   }
-  return response.json() as Promise<WorkspaceOverview>;
 }
