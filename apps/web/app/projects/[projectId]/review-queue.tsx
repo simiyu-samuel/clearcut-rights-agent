@@ -169,7 +169,25 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
         if (!statusResponse.ok) throw new Error("Unable to read research status.");
         const status = await statusResponse.json() as { status: string; error_code?: string | null };
         if (status.status === "completed" || status.status === "partial") {
+          let cardReady = false;
+          for (let cardAttempt = 0; cardAttempt < 20; cardAttempt += 1) {
+            const cardResponse = await fetch(`${apiUrl}/v1/assets/${asset.id}/clearance-card`, {
+              headers: { "x-organization-id": "demo-org" },
+              cache: "no-store",
+            });
+            if (cardResponse.ok) {
+              const card = await cardResponse.json() as { research_run_id?: string };
+              if (card.research_run_id === run.id) {
+                cardReady = true;
+                break;
+              }
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 500));
+          }
           await loadQueue();
+          if (!cardReady) {
+            setMessage("Research finished. The clearance card is still being prepared; refresh shortly if it does not appear.");
+          }
           return;
         }
         if (status.status === "failed") throw new Error(status.error_code ?? "Research failed.");

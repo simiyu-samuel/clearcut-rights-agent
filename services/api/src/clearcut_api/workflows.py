@@ -124,9 +124,11 @@ async def process_research_run(
             if sources:
                 runs.add_sources(sources)
             request_id = search_results[0].request_id if search_results else None
-            runs.update(
-                run_id, status="completed" if sources else "partial", provider_request_id=request_id
-            )
+            # Keep the run in `running` until its clearance card is persisted. The
+            # review UI uses the run status as its signal to refresh cards, so
+            # publishing completion before card generation creates a race where
+            # the first refresh sees sources but no clearance card.
+            runs.update(run_id, provider_request_id=request_id)
             asset = AssetRepository(session).get(asset_id, organization_id)
             stored_sources = runs.list_sources(run_id)
         if asset is None:
@@ -161,6 +163,11 @@ async def process_research_run(
                         needs_human_review=card_output.needs_human_review,
                     )
                 )
+            ResearchRunRepository(session).update(
+                run_id,
+                status="completed" if stored_sources else "partial",
+                provider_request_id=request_id,
+            )
     except ParallelProviderError as exc:
         with database.session_factory() as session:
             ResearchRunRepository(session).update(run_id, status="failed", error_code=exc.code)
