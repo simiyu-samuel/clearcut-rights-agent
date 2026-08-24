@@ -14,6 +14,7 @@ export function UploadForm({ projectId }: UploadFormProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!file) {
       setMessage("Choose a screenplay first.");
       return;
@@ -38,7 +39,7 @@ export function UploadForm({ projectId }: UploadFormProps) {
       setUploadedFilename(document.original_filename);
       setMessage(`${document.original_filename} uploaded. Start analysis to extract assets.`);
       setFile(null);
-      event.currentTarget.reset();
+      form.reset();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Upload failed");
     } finally {
