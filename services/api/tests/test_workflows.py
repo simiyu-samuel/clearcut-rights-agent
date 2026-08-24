@@ -21,6 +21,7 @@ from clearcut_api.models import (
     SourceRecord,
 )
 from clearcut_api.outreach import build_outreach_draft
+from clearcut_api.pdf import build_pdf
 from clearcut_api.providers.parallel_api import ParallelApiProvider
 from clearcut_api.reporting import build_clearance_report
 from clearcut_api.repositories import (
@@ -231,6 +232,45 @@ def test_outreach_draft_and_report_keep_human_boundary() -> None:
     assert "Internal research note" not in body
     assert "not legal advice" in report
     assert "https://example.com/rights" in report
+
+
+def test_clearance_report_pdf_is_branded_and_structured() -> None:
+    markdown = """# ClearCut clearance report — The Last Signal
+
+- Project type: Feature film
+- Generated: 2026-08-24T10:00:00+00:00
+- Assets reviewed: 1
+
+> ClearCut provides research and workflow support. This report is not legal advice.
+
+## Asset summary
+
+| Asset | Category | Status | Risk | Confidence | Evidence |
+|---|---|---|---:|---:|---:|
+| Midnight City | music | pending_review | 90/100 | 100% | 1 |
+
+## Detailed review
+
+### Midnight City
+
+- Category: music
+- Context: A radio plays Midnight City.
+- Clearance card status: `pending_review`
+- Risk score: `90/100`
+- Confidence: `100%`
+- Summary: Commercial music requires rights review.
+- Recommended next action: Confirm composition and master rights.
+
+Evidence:
+- [Rights source](https://example.com/rights) — Licensing guidance.
+"""
+
+    pdf = build_pdf(markdown)
+
+    assert pdf.startswith(b"%PDF-1.4")
+    assert b"/Type /Pages" in pdf
+    assert b"CLEARCUT" in pdf
+    assert b"Midnight City" in pdf
 
 
 def test_research_run_creates_evidence_backed_clearance_card() -> None:

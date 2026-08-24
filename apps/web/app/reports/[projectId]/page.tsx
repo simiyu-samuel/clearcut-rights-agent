@@ -21,7 +21,7 @@ export default async function ReportPage({ params }: { params: Promise<{ project
       </aside>
       <main className="main">
         <header className="topbar"><div className="breadcrumbs"><Link href="/reports">Reports</Link><span>/</span><strong>{project.title}</strong></div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />Staging environment</div></div></header>
-        <div className="content"><section className="hero"><div><div className="eyebrow">{project.project_type} · {project.status}</div><h1>{project.title}</h1><p>Review the latest evidence-backed clearance report and download it for production records.</p></div><ReportButton projectId={project.id} /></section>{report ? <ReportDocument projectId={project.id} report={report} /> : <section className="panel report-empty"><h2>No report generated yet.</h2><p>Generate a report from this page after the research and approval decisions are complete.</p><ReportButton projectId={project.id} /></section>}</div>
+        <div className="content"><section className="hero"><div><div className="eyebrow">{project.project_type} · {project.status}</div><h1>{project.title}</h1><p>Review the latest evidence-backed clearance report and download it for production records.</p></div><ReportButton projectId={project.id} /></section>{report ? <ReportDocument projectId={project.id} project={project} report={report} reports={reports} /> : <section className="panel report-empty"><h2>No report generated yet.</h2><p>Generate a report from this page after the research and approval decisions are complete.</p><ReportButton projectId={project.id} /></section>}</div>
       </main>
     </div>
   );
