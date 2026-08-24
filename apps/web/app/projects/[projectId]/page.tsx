@@ -1,13 +1,20 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { demoAssets, demoProjects } from "@/lib/demo-data";
+import { notFound } from "next/navigation";
+import { fetchProject } from "@/lib/api";
 import { ReportButton } from "./report-button";
 import { ReviewQueue } from "./review-queue";
 import { UploadForm } from "./upload-form";
 
 export default async function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const project = demoProjects.find((item) => item.id === projectId) ?? demoProjects[0];
+  const project = await fetchProject(projectId);
+  if (!project) {
+    notFound();
+  }
+  const targetRelease = project.target_release_at
+    ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric" }).format(new Date(project.target_release_at))
+    : "Not set";
 
   return (
     <div className="app-shell">
@@ -19,13 +26,13 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
       </aside>
 
       <main className="main">
-        <header className="topbar"><div className="breadcrumbs"><Link href="/">Projects</Link><span>/</span><strong>{project.title}</strong></div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />Demo environment</div><button className="icon-button" aria-label="Notifications">◌</button></div></header>
+        <header className="topbar"><div className="breadcrumbs"><Link href="/">Projects</Link><span>/</span><strong>{project.title}</strong></div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />Staging environment</div><button className="icon-button" aria-label="Notifications">◌</button></div></header>
         <div className="content">
-          <section className="project-header"><div><div className="eyebrow">Feature film · Review queue</div><h1>{project.title}</h1><p>Target release · 18 November 2026 &nbsp;·&nbsp; {project.distribution_modes.join(" + ")}</p></div><div className="header-actions"><ReportButton projectId={project.id} /><button className="primary-button">Start analysis</button></div></section>
+          <section className="project-header"><div><div className="eyebrow">{project.project_type} · Review queue</div><h1>{project.title}</h1><p>Target release · {targetRelease} &nbsp;·&nbsp; {project.distribution_modes.join(" + ") || "Distribution plan not set"}</p></div><div className="header-actions"><ReportButton projectId={project.id} /><button className="primary-button">Start analysis</button></div></section>
           <UploadForm projectId={project.id} />
           <ReviewQueue projectId={project.id} />
           <div className="project-layout">
-            <section className="panel"><div className="panel-header"><h2>Rights inventory</h2><span>5 assets · 3 need attention</span></div><div className="asset-list">{demoAssets.map((asset) => <div className="asset-row" key={asset.number}><div className="asset-number">{asset.number}</div><div><div className="asset-name">{asset.name}</div><div className="asset-context">{asset.context}</div></div><div className="asset-category">{asset.category}</div><div className={`risk-label ${asset.risk}`}>{asset.risk === "high" ? "High risk" : asset.risk === "medium" ? "Review" : "Likely clear"}</div></div>)}</div></section>
+            <section className="panel"><div className="panel-header"><h2>Rights inventory</h2><span>Live assets appear in the review queue above</span></div><div className="asset-list"><div className="asset-row"><div className="asset-number">↗</div><div><div className="asset-name">Evidence-backed inventory</div><div className="asset-context">Upload a screenplay to extract and research rights-bearing assets.</div></div><div className="asset-category">Live</div><div className="risk-label low">Ready</div></div></div></section>
             <div className="side-stack">
               <section className="panel"><div className="panel-header"><h2>Latest evidence</h2><span>Parallel</span></div><div className="evidence-list"><div className="evidence-item"><div className="evidence-title">Official licensing page found</div><div className="evidence-source">music-rights.example · 4 min ago</div></div><div className="evidence-item"><div className="evidence-title">Trademark owner needs confirmation</div><div className="evidence-source">brand-registry.example · 7 min ago</div></div><div className="evidence-item"><div className="evidence-title">Location authority identified</div><div className="evidence-source">city-filming.example · 11 min ago</div></div></div></section>
               <section className="panel"><div className="panel-header"><h2>Project activity</h2><span>Today</span></div><div className="timeline"><div className="timeline-item"><div className="timeline-dot" /><div><h3>Research run completed</h3><p>5 source records normalized · 08:15</p></div></div><div className="timeline-item"><div className="timeline-dot" /><div><h3>3 assets moved to review</h3><p>Risk policy v0.1 · 08:12</p></div></div><div className="timeline-item"><div className="timeline-dot" /><div><h3>Screenplay v1 uploaded</h3><p>The Last Signal · 08:04</p></div></div></div></section>
