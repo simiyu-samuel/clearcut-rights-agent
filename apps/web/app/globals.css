@@ -112,6 +112,19 @@ button { font: inherit; }
 .file-picker input { display: none; }
 .upload-message { color: var(--gold); font-size: 11px; }
 .secondary-button:disabled { cursor: wait; opacity: 0.55; }
+.project-form { max-width: 720px; }
+.project-form-body { display: grid; gap: 17px; padding: 20px; }
+.form-field { display: grid; gap: 7px; }
+.form-field span { color: var(--subtle); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+.form-field input { background: rgba(255, 255, 255, 0.025); border: 1px solid var(--line); border-radius: 4px; color: var(--ink); font: inherit; font-size: 13px; padding: 11px 12px; }
+.form-field input:focus { border-color: var(--gold-soft); outline: none; }
+.form-message { color: var(--red); font-size: 11px; }
+.form-actions { display: flex; justify-content: flex-end; margin-top: 3px; }
+.report-list { display: grid; }
+.report-row { align-items: center; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 18px; padding: 17px 18px; }
+.report-row:last-child { border-bottom: 0; }
+.report-row > div:first-child { display: grid; gap: 5px; }
+.report-row span { color: var(--subtle); font-size: 11px; }
 .review-panel { margin-bottom: 28px; }
 .panel-subtitle { color: var(--subtle); font-size: 11px; margin: 5px 0 0; }
 .review-message, .review-empty { color: var(--muted); font-size: 11px; padding: 17px 18px; }

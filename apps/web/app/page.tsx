@@ -21,7 +21,7 @@ export default async function HomePage() {
         <nav className="nav">
           <Link className="nav-item active" href="/"><span className="nav-icon">⌂</span>Projects</Link>
           <Link className="nav-item" href={(reviewProject ? `/projects/${reviewProject.id}` : "/") as Route}><span className="nav-icon">◈</span>Review queue</Link>
-          <Link className="nav-item" href="/"><span className="nav-icon">↗</span>Reports</Link>
+          <Link className="nav-item" href="/reports"><span className="nav-icon">↗</span>Reports</Link>
         </nav>
         <div className="sidebar-bottom">
           <div className="account"><div className="avatar">SM</div><div><div className="account-name">Studio Meridian</div><div className="account-role">Producer workspace</div></div></div>
@@ -37,7 +37,7 @@ export default async function HomePage() {
         <div className="content">
           <section className="hero">
             <div><div className="eyebrow">Studio Meridian · {projects.length} {projects.length === 1 ? "project" : "projects"}</div><h1>Keep the story moving.</h1><p>ClearCut turns scripts and cuts into evidence-backed rights work, so your production team can see what needs attention before distribution.</p></div>
-            <button className="primary-button">+ New project</button>
+            <Link className="primary-button" href="/projects/new">+ New project</Link>
           </section>
 
           <section>
