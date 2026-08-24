@@ -18,6 +18,8 @@ from clearcut_api.models import (
     Job,
     Project,
     ResearchRun,
+    ResearchSession,
+    ResearchTask,
     SourceRecord,
 )
 from clearcut_api.outreach import build_outreach_draft
@@ -31,9 +33,16 @@ from clearcut_api.repositories import (
     JobRepository,
     ProjectRepository,
     ResearchRunRepository,
+    ResearchSessionRepository,
+    ResearchTaskRepository,
 )
 from clearcut_api.storage import LocalObjectStore
-from clearcut_api.workflows import process_document_analysis, process_research_run
+from clearcut_api.workflows import (
+    build_research_plan,
+    process_document_analysis,
+    process_research_run,
+    process_research_task,
+)
 
 from .test_api import make_database
 
@@ -323,3 +332,93 @@ def test_research_run_creates_evidence_backed_clearance_card() -> None:
         assert card.evidence_count == 1
         assert card.status == "pending_review"
         assert card.needs_human_review is True
+
+
+def test_multi_angle_research_session_aggregates_tasks_and_evidence() -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        project = ProjectRepository(session).create(
+            Project(
+                organization_id="demo-org", title="The Last Signal", project_type="Feature film"
+            )
+        )
+        asset = Asset(
+            organization_id="demo-org",
+            project_id=project.id,
+            document_id="document-1",
+            canonical_name="Midnight City",
+            category="music",
+            context="A radio plays Midnight City.",
+            source_start=0,
+            source_end=32,
+            extraction_confidence=0.9,
+            risk_status="high_risk",
+            reason_codes=["music_identified"],
+        )
+        AssetRepository(session).create_many([asset])
+        objective, plans = build_research_plan(asset)
+        run = ResearchRunRepository(session).create(
+            ResearchRun(
+                organization_id="demo-org",
+                asset_id=asset.id,
+                provider="parallel",
+                operation="multi_angle_search",
+                objective=objective,
+                query="Midnight City music rights clearance research session",
+            )
+        )
+        research_session = ResearchSessionRepository(session).create(
+            ResearchSession(
+                organization_id="demo-org",
+                asset_id=asset.id,
+                provider="parallel",
+                objective=objective,
+                status="planned",
+                total_tasks=len(plans),
+                completed_tasks=0,
+            )
+        )
+        tasks = ResearchTaskRepository(session).create_many(
+            [
+                ResearchTask(
+                    organization_id="demo-org",
+                    session_id=research_session.id,
+                    research_run_id=run.id,
+                    angle=plan.angle,
+                    title=plan.title,
+                    objective=plan.objective,
+                    query=plan.query,
+                    status="queued",
+                    source_count=0,
+                    quality_tier="unrated",
+                    gap_codes=[],
+                )
+                for plan in plans
+            ]
+        )
+
+    for task in tasks:
+        asyncio.run(
+            process_research_task(
+                database,
+                task.id,
+                "demo-org",
+                Settings(parallel_mode="fixture", agent_mode="fixture"),
+            )
+        )
+
+    with database.session_factory() as session:
+        stored_session = ResearchSessionRepository(session).get(research_session.id, "demo-org")
+        stored_tasks = ResearchTaskRepository(session).list_for_session(
+            research_session.id, "demo-org"
+        )
+        stored_run = ResearchRunRepository(session).get(run.id, "demo-org")
+        sources = ResearchRunRepository(session).list_sources(run.id)
+        card = ClearanceCardRepository(session).get_for_run(run.id, "demo-org")
+        assert stored_session is not None and stored_session.status == "completed"
+        assert stored_session.completed_tasks == 4
+        assert all(task.status == "completed" for task in stored_tasks)
+        assert all(task.quality_tier == "demo" for task in stored_tasks)
+        assert stored_run is not None and stored_run.status == "completed"
+        assert len(sources) == 4
+        assert card is not None and card.evidence_count == 4

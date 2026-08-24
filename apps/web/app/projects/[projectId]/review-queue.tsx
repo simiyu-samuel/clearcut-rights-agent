@@ -93,6 +93,9 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
 
   useEffect(() => {
     void loadQueue();
+    const refresh = () => void loadQueue();
+    window.addEventListener("clearcut:research-updated", refresh);
+    return () => window.removeEventListener("clearcut:research-updated", refresh);
   }, [projectId]);
 
   const latestCards = useMemo(() => {

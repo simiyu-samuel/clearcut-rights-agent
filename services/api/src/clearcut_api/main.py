@@ -33,6 +33,8 @@ from .models import (
     OutreachDraft,
     Project,
     ResearchRun,
+    ResearchSession,
+    ResearchTask,
     SourceRecord,
 )
 from .outreach import build_outreach_draft
@@ -48,6 +50,8 @@ from .repositories import (
     OutreachDraftRepository,
     ProjectRepository,
     ResearchRunRepository,
+    ResearchSessionRepository,
+    ResearchTaskRepository,
 )
 from .schemas import (
     AnalysisRunCreate,
@@ -64,11 +68,18 @@ from .schemas import (
     ProjectRead,
     ResearchRunCreate,
     ResearchRunRead,
+    ResearchSessionCreate,
+    ResearchSessionRead,
     SourceRecordRead,
     WorkspaceOverviewRead,
 )
 from .storage import ObjectStore, create_object_store
-from .workflows import process_document_analysis, process_research_run
+from .workflows import (
+    build_research_plan,
+    process_document_analysis,
+    process_research_run,
+    process_research_task,
+)
 
 ALLOWED_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
 ALLOWED_TEXT_MIME_TYPES = {"text/plain", "text/markdown", "application/octet-stream"}
@@ -115,6 +126,69 @@ def create_app(
         if project is None:
             raise HTTPException(status_code=404, detail="project_not_found")
         return project
+
+    def research_session_payload(
+        research_session: ResearchSession, tasks: list[ResearchTask]
+    ) -> dict[str, object]:
+        return {
+            "id": research_session.id,
+            "organization_id": research_session.organization_id,
+            "asset_id": research_session.asset_id,
+            "provider": research_session.provider,
+            "objective": research_session.objective,
+            "status": research_session.status,
+            "total_tasks": research_session.total_tasks,
+            "completed_tasks": research_session.completed_tasks,
+            "created_at": research_session.created_at,
+            "updated_at": research_session.updated_at,
+            "tasks": tasks,
+        }
+
+    def create_research_session_records(
+        session: Session,
+        asset: Asset,
+        organization_id: str,
+        objective: str | None,
+    ) -> tuple[ResearchSession, list[ResearchTask]]:
+        plan_objective, plans = build_research_plan(asset, objective)
+        run = ResearchRun(
+            organization_id=organization_id,
+            asset_id=asset.id,
+            provider="parallel",
+            operation="multi_angle_search",
+            objective=plan_objective,
+            query=f"{asset.canonical_name} {asset.category} rights clearance research session",
+        )
+        run = ResearchRunRepository(session).create(run)
+        research_session = ResearchSession(
+            organization_id=organization_id,
+            asset_id=asset.id,
+            provider="parallel",
+            objective=plan_objective,
+            status="planned",
+            total_tasks=len(plans),
+            completed_tasks=0,
+        )
+        research_session = ResearchSessionRepository(session).create(research_session)
+        tasks = ResearchTaskRepository(session).create_many(
+            [
+                ResearchTask(
+                    organization_id=organization_id,
+                    session_id=research_session.id,
+                    research_run_id=run.id,
+                    angle=plan.angle,
+                    title=plan.title,
+                    objective=plan.objective,
+                    query=plan.query,
+                    status="queued",
+                    source_count=0,
+                    quality_tier="unrated",
+                    gap_codes=[],
+                )
+                for plan in plans
+            ]
+        )
+        return research_session, tasks
 
     @app.get("/healthz", tags=["system"])
     def healthz() -> dict[str, str]:
@@ -389,6 +463,108 @@ def create_app(
         if job is None:
             raise HTTPException(status_code=404, detail="job_not_found")
         return job
+
+    @app.post(
+        "/v1/assets/{asset_id}/research-sessions",
+        response_model=ResearchSessionRead,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["research"],
+    )
+    def create_research_session(
+        asset_id: str,
+        payload: ResearchSessionCreate,
+        background_tasks: BackgroundTasks,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        active_session = next(
+            (
+                item
+                for item in ResearchSessionRepository(session).list_for_asset(
+                    asset_id, organization_id
+                )
+                if item.status in {"planned", "running"}
+            ),
+            None,
+        )
+        if active_session is not None:
+            raise HTTPException(status_code=409, detail="research_session_already_running")
+        research_session, tasks = create_research_session_records(
+            session, asset, organization_id, payload.objective
+        )
+        for task in tasks:
+            background_tasks.add_task(
+                process_research_task, db, task.id, organization_id, settings
+            )
+        return research_session_payload(research_session, tasks)
+
+    @app.get(
+        "/v1/projects/{project_id}/research-sessions",
+        response_model=list[ResearchSessionRead],
+        tags=["research"],
+    )
+    def list_research_sessions(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[dict[str, object]]:
+        require_project(session, project_id, organization_id)
+        sessions = ResearchSessionRepository(session).list_for_project(
+            project_id, organization_id
+        )
+        tasks = ResearchTaskRepository(session)
+        return [
+            research_session_payload(
+                research_session, tasks.list_for_session(research_session.id, organization_id)
+            )
+            for research_session in sessions
+        ]
+
+    @app.get(
+        "/v1/research-sessions/{session_id}",
+        response_model=ResearchSessionRead,
+        tags=["research"],
+    )
+    def get_research_session(
+        session_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        research_session = ResearchSessionRepository(session).get(session_id, organization_id)
+        if research_session is None:
+            raise HTTPException(status_code=404, detail="research_session_not_found")
+        tasks = ResearchTaskRepository(session).list_for_session(session_id, organization_id)
+        return research_session_payload(research_session, tasks)
+
+    @app.post(
+        "/v1/research-sessions/{session_id}/retry",
+        response_model=ResearchSessionRead,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["research"],
+    )
+    def retry_research_session(
+        session_id: str,
+        background_tasks: BackgroundTasks,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        previous = ResearchSessionRepository(session).get(session_id, organization_id)
+        if previous is None:
+            raise HTTPException(status_code=404, detail="research_session_not_found")
+        asset = AssetRepository(session).get(previous.asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        research_session, tasks = create_research_session_records(
+            session, asset, organization_id, previous.objective
+        )
+        for task in tasks:
+            background_tasks.add_task(
+                process_research_task, db, task.id, organization_id, settings
+            )
+        return research_session_payload(research_session, tasks)
 
     @app.post(
         "/v1/assets/{asset_id}/research-runs",

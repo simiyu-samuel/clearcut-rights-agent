@@ -1,6 +1,6 @@
 # ClearCut Product, UI/UX, and Feature Expansion Plan
 
-**Status:** Proposed for review  
+**Status:** Wave 2 in progress
 **Date:** 2026-08-24  
 **Purpose:** Turn the working ClearCut backend into a credible production workspace and a stronger hackathon submission.
 
@@ -449,11 +449,12 @@ Highest value for the next demo and immediate credibility.
 
 ### Wave 2 — Research depth and agent transparency
 
-- research sessions and multi-angle tasks;
-- research plan visible before execution;
-- source quality and conflict indicators;
-- missing-evidence task generation;
-- retry and recheck controls;
+- [x] research sessions and multi-angle tasks;
+- [x] research plan visible before execution;
+- [x] source quality and evidence-gap indicators;
+- [x] re-run/recheck control for a new research pass;
+- [ ] conflict detection and missing-evidence task generation;
+- [ ] scheduled source rechecks;
 - right-sized category playbooks;
 - provider trace panel for demo mode and admin mode.
 

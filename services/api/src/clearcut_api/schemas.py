@@ -15,6 +15,8 @@ RiskStatus = Literal[
     "approved_for_delivery",
 ]
 ResearchStatus = Literal["queued", "running", "completed", "partial", "failed"]
+ResearchSessionStatus = Literal["planned", "running", "completed", "partial", "failed"]
+ResearchTaskStatus = Literal["queued", "running", "completed", "partial", "failed"]
 CardStatus = Literal["pending_review", "approved", "needs_more_research", "rejected", "escalated"]
 ApprovalDecision = Literal[
     "approve_next_action",
@@ -118,6 +120,10 @@ class ResearchRunCreate(BaseModel):
     query: str = Field(min_length=2, max_length=500)
 
 
+class ResearchSessionCreate(BaseModel):
+    objective: str | None = Field(default=None, min_length=10, max_length=2000)
+
+
 class SourceRecordRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -146,6 +152,42 @@ class ResearchRunRead(BaseModel):
     error_code: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class ResearchTaskRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    session_id: str
+    research_run_id: str
+    angle: str
+    title: str
+    objective: str
+    query: str
+    status: ResearchTaskStatus
+    source_count: int = Field(ge=0)
+    quality_tier: str
+    gap_codes: list[str]
+    error_code: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ResearchSessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    asset_id: str
+    provider: str
+    objective: str
+    status: ResearchSessionStatus
+    total_tasks: int = Field(ge=0)
+    completed_tasks: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+    tasks: list[ResearchTaskRead] = Field(default_factory=list)
 
 
 class ClearanceCardRead(BaseModel):

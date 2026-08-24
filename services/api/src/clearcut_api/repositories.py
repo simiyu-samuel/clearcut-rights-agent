@@ -12,6 +12,8 @@ from .models import (
     OutreachDraft,
     Project,
     ResearchRun,
+    ResearchSession,
+    ResearchTask,
     SourceRecord,
 )
 
@@ -209,6 +211,97 @@ class ResearchRunRepository:
             .order_by(SourceRecord.retrieved_at.asc())
         )
         return list(self.session.scalars(statement))
+
+
+class ResearchSessionRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, research_session: ResearchSession) -> ResearchSession:
+        self.session.add(research_session)
+        self.session.commit()
+        self.session.refresh(research_session)
+        return research_session
+
+    def get(self, session_id: str, organization_id: str) -> ResearchSession | None:
+        statement = select(ResearchSession).where(
+            ResearchSession.id == session_id,
+            ResearchSession.organization_id == organization_id,
+        )
+        return self.session.scalar(statement)
+
+    def list_for_asset(self, asset_id: str, organization_id: str) -> list[ResearchSession]:
+        statement = (
+            select(ResearchSession)
+            .where(
+                ResearchSession.asset_id == asset_id,
+                ResearchSession.organization_id == organization_id,
+            )
+            .order_by(ResearchSession.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def list_for_project(self, project_id: str, organization_id: str) -> list[ResearchSession]:
+        statement = (
+            select(ResearchSession)
+            .join(Asset, Asset.id == ResearchSession.asset_id)
+            .where(
+                Asset.project_id == project_id,
+                ResearchSession.organization_id == organization_id,
+            )
+            .order_by(ResearchSession.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def update(self, session_id: str, **values: object) -> ResearchSession | None:
+        research_session = self.session.get(ResearchSession, session_id)
+        if research_session is None:
+            return None
+        for key, value in values.items():
+            setattr(research_session, key, value)
+        self.session.commit()
+        self.session.refresh(research_session)
+        return research_session
+
+
+class ResearchTaskRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create_many(self, tasks: list[ResearchTask]) -> list[ResearchTask]:
+        self.session.add_all(tasks)
+        self.session.commit()
+        for task in tasks:
+            self.session.refresh(task)
+        return tasks
+
+    def get(self, task_id: str, organization_id: str) -> ResearchTask | None:
+        statement = select(ResearchTask).where(
+            ResearchTask.id == task_id,
+            ResearchTask.organization_id == organization_id,
+        )
+        return self.session.scalar(statement)
+
+    def list_for_session(self, session_id: str, organization_id: str) -> list[ResearchTask]:
+        statement = (
+            select(ResearchTask)
+            .where(
+                ResearchTask.session_id == session_id,
+                ResearchTask.organization_id == organization_id,
+            )
+            .order_by(ResearchTask.created_at.asc())
+        )
+        return list(self.session.scalars(statement))
+
+    def update(self, task_id: str, **values: object) -> ResearchTask | None:
+        task = self.session.get(ResearchTask, task_id)
+        if task is None:
+            return None
+        for key, value in values.items():
+            setattr(task, key, value)
+        self.session.commit()
+        self.session.refresh(task)
+        return task
 
 
 class ClearanceCardRepository:

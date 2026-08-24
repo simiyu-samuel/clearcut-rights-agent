@@ -89,6 +89,45 @@ class Asset(Base):
     )
 
 
+class ResearchSession(Base):
+    __tablename__ = "research_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    asset_id: Mapped[str] = mapped_column(String(36), index=True)
+    provider: Mapped[str] = mapped_column(String(80))
+    objective: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="planned", index=True)
+    total_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    completed_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class ResearchTask(Base):
+    __tablename__ = "research_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    research_run_id: Mapped[str] = mapped_column(String(36), index=True)
+    angle: Mapped[str] = mapped_column(String(80), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    objective: Mapped[str] = mapped_column(Text)
+    query: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="queued", index=True)
+    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    quality_tier: Mapped[str] = mapped_column(String(40), default="unrated")
+    gap_codes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
 class ResearchRun(Base):
     __tablename__ = "research_runs"
 

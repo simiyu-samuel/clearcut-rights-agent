@@ -6,6 +6,7 @@ import { ReportButton } from "./report-button";
 import { ReviewQueue } from "./review-queue";
 import { ProjectHealth } from "./project-health";
 import { RightsInventory } from "./rights-inventory";
+import { ResearchPanel } from "./research-panel";
 import { UploadForm } from "./upload-form";
 
 export default async function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
@@ -34,6 +35,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
           <section className={`workflow-banner ${project.status}`}><div><strong>{project.status === "complete" ? "Clearance review complete" : project.status === "review" ? "Human review is still required" : project.status === "active" ? "Analysis is in progress" : "Project setup required"}</strong><p>{project.status === "complete" ? "All researched assets have approved next actions. Generate or view the latest report for production records." : project.status === "review" ? "Review each clearance card, record the producer decision, and create permission-request drafts where needed." : project.status === "active" ? "Continue researching extracted assets until each one has an evidence-backed clearance card." : "Upload a screenplay and start analysis to create the rights inventory."}</p></div>{project.status === "complete" ? <Link className="secondary-button" href={`/reports/${project.id}` as Route}>Open report</Link> : null}</section>
           <ProjectHealth projectId={project.id} />
           <UploadForm projectId={project.id} />
+          <ResearchPanel projectId={project.id} />
           <ReviewQueue projectId={project.id} />
           <div className="project-layout">
             <RightsInventory projectId={project.id} />
