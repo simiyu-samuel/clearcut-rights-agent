@@ -17,12 +17,14 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .db import Database, create_database
 from .models import (
     Approval,
+    Asset,
     AuditEvent,
     ClearanceCard,
     ClearanceReport,
@@ -31,6 +33,7 @@ from .models import (
     OutreachDraft,
     Project,
     ResearchRun,
+    SourceRecord,
 )
 from .outreach import build_outreach_draft
 from .pdf import build_pdf
@@ -62,6 +65,7 @@ from .schemas import (
     ResearchRunCreate,
     ResearchRunRead,
     SourceRecordRead,
+    WorkspaceOverviewRead,
 )
 from .storage import ObjectStore, create_object_store
 from .workflows import process_document_analysis, process_research_run
@@ -148,6 +152,110 @@ def create_app(
         organization_id: str = Depends(get_organization_id),
     ) -> list[Project]:
         return ProjectRepository(session).list(organization_id)
+
+    @app.get(
+        "/v1/workspace/overview",
+        response_model=WorkspaceOverviewRead,
+        tags=["workspace"],
+    )
+    def workspace_overview(
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, int]:
+        from datetime import UTC, datetime, timedelta
+
+        period_days = 30
+        period_start = datetime.now(UTC) - timedelta(days=period_days)
+        project_count = int(
+            session.scalar(
+                select(func.count(Project.id)).where(Project.organization_id == organization_id)
+            )
+            or 0
+        )
+        total_assets = int(
+            session.scalar(
+                select(func.count(Asset.id)).where(
+                    Asset.organization_id == organization_id,
+                    Asset.created_at >= period_start,
+                )
+            )
+            or 0
+        )
+        assets_reviewed = int(
+            session.scalar(
+                select(func.count(func.distinct(ClearanceCard.asset_id)))
+                .join(Asset, Asset.id == ClearanceCard.asset_id)
+                .where(
+                    ClearanceCard.organization_id == organization_id,
+                    ClearanceCard.created_at >= period_start,
+                )
+            )
+            or 0
+        )
+        attention_statuses = ("high_risk", "needs_review", "blocked", "insufficient_evidence")
+        assets_need_attention = int(
+            session.scalar(
+                select(func.count(Asset.id)).where(
+                    Asset.organization_id == organization_id,
+                    Asset.updated_at >= period_start,
+                    Asset.risk_status.in_(attention_statuses),
+                )
+            )
+            or 0
+        )
+        high_priority_items = int(
+            session.scalar(
+                select(func.count(Asset.id)).where(
+                    Asset.organization_id == organization_id,
+                    Asset.updated_at >= period_start,
+                    Asset.risk_status.in_(("high_risk", "blocked")),
+                )
+            )
+            or 0
+        )
+        evidence_assets = int(
+            session.scalar(
+                select(func.count(func.distinct(ClearanceCard.asset_id)))
+                .join(Asset, Asset.id == ClearanceCard.asset_id)
+                .where(
+                    ClearanceCard.organization_id == organization_id,
+                    ClearanceCard.created_at >= period_start,
+                    ClearanceCard.evidence_count > 0,
+                )
+            )
+            or 0
+        )
+        research_runs = int(
+            session.scalar(
+                select(func.count(ResearchRun.id)).where(
+                    ResearchRun.organization_id == organization_id,
+                    ResearchRun.created_at >= period_start,
+                )
+            )
+            or 0
+        )
+        parallel_sources = int(
+            session.scalar(
+                select(func.count(SourceRecord.id))
+                .join(ResearchRun, ResearchRun.id == SourceRecord.research_run_id)
+                .where(
+                    ResearchRun.organization_id == organization_id,
+                    SourceRecord.retrieved_at >= period_start,
+                )
+            )
+            or 0
+        )
+        evidence_coverage = round((evidence_assets / total_assets) * 100) if total_assets else 0
+        return {
+            "period_days": period_days,
+            "project_count": project_count,
+            "assets_reviewed": assets_reviewed,
+            "assets_need_attention": assets_need_attention,
+            "high_priority_items": high_priority_items,
+            "evidence_coverage": evidence_coverage,
+            "research_runs": research_runs,
+            "parallel_sources": parallel_sources,
+        }
 
     @app.get("/v1/projects/{project_id}", response_model=ProjectRead, tags=["projects"])
     def get_project(

@@ -1,13 +1,13 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { fetchProjects } from "@/lib/api";
+import { fetchProjects, fetchWorkspaceOverview } from "@/lib/api";
 
 function statusLabel(status: string) {
   return status === "review" ? "Needs review" : status[0].toUpperCase() + status.slice(1);
 }
 
 export default async function HomePage() {
-  const projects = await fetchProjects();
+  const [projects, overview] = await Promise.all([fetchProjects(), fetchWorkspaceOverview()]);
   const reviewProject = projects.find((project) => project.status === "review") ?? projects[0];
 
   return (
@@ -55,10 +55,10 @@ export default async function HomePage() {
           <section>
             <div className="section-heading"><h2>Workspace overview</h2><span className="card-meta">Last 30 days</span></div>
             <div className="stats-grid">
-              <div className="stat-card"><div className="stat-label">Assets reviewed</div><div className="stat-value">24</div><div className="stat-note">Across 2 projects</div></div>
-              <div className="stat-card"><div className="stat-label">Need attention</div><div className="stat-value" style={{ color: "var(--gold)" }}>07</div><div className="stat-note">3 high-priority items</div></div>
-              <div className="stat-card"><div className="stat-label">Evidence coverage</div><div className="stat-value" style={{ color: "var(--green)" }}>86%</div><div className="stat-note">+12% from last review</div></div>
-              <div className="stat-card"><div className="stat-label">Research runs</div><div className="stat-value">18</div><div className="stat-note">Parallel-backed sources</div></div>
+              <div className="stat-card"><div className="stat-label">Assets reviewed</div><div className="stat-value">{overview.assets_reviewed}</div><div className="stat-note">Across {overview.project_count} {overview.project_count === 1 ? "project" : "projects"}</div></div>
+              <div className="stat-card"><div className="stat-label">Need attention</div><div className="stat-value" style={{ color: "var(--gold)" }}>{overview.assets_need_attention}</div><div className="stat-note">{overview.high_priority_items} high-priority {overview.high_priority_items === 1 ? "item" : "items"}</div></div>
+              <div className="stat-card"><div className="stat-label">Evidence coverage</div><div className="stat-value" style={{ color: "var(--green)" }}>{overview.evidence_coverage}%</div><div className="stat-note">Assets with evidence-backed cards</div></div>
+              <div className="stat-card"><div className="stat-label">Research runs</div><div className="stat-value">{overview.research_runs}</div><div className="stat-note">{overview.parallel_sources} Parallel-backed sources</div></div>
             </div>
           </section>
         </div>

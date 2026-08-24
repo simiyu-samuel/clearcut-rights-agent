@@ -50,6 +50,17 @@ class ProjectRead(BaseModel):
     updated_at: datetime
 
 
+class WorkspaceOverviewRead(BaseModel):
+    period_days: int
+    project_count: int
+    assets_reviewed: int
+    assets_need_attention: int
+    high_priority_items: int
+    evidence_coverage: int
+    research_runs: int
+    parallel_sources: int
+
+
 class AnalysisRunCreate(BaseModel):
     document_id: str | None = Field(default=None, max_length=120)
 

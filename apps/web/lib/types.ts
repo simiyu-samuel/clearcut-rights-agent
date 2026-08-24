@@ -24,6 +24,17 @@ export type ClearanceReport = {
   created_at: string;
 };
 
+export type WorkspaceOverview = {
+  period_days: number;
+  project_count: number;
+  assets_reviewed: number;
+  assets_need_attention: number;
+  high_priority_items: number;
+  evidence_coverage: number;
+  research_runs: number;
+  parallel_sources: number;
+};
+
 export type AssetRisk = "high" | "medium" | "low";
 
 export type DemoAsset = {
