@@ -680,6 +680,7 @@ def create_app(
         if existing is not None and existing.expires_at > datetime.now(UTC):
             raise HTTPException(status_code=409, detail="invitation_already_pending")
         invitation = OrganizationInvitation(
+            id=str(uuid4()),
             organization_id=organization_id,
             email=email,
             display_name=payload.display_name.strip() if payload.display_name else None,

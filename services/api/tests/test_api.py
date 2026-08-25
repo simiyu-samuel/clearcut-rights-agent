@@ -9,6 +9,7 @@ from clearcut_api.main import create_app
 from clearcut_api.models import (
     Approval,
     Asset,
+    AuditEvent,
     Base,
     ClearanceCard,
     Job,
@@ -85,6 +86,35 @@ def test_invitation_repository_matches_pending_email_only() -> None:
 
         matches = repository.list_pending_for_email("producer@example.com")
         assert [item.id for item in matches] == [pending.id]
+
+
+def test_invitation_id_is_available_for_audit_event_before_flush() -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        invitation = OrganizationInvitation(
+            id="invitation-for-audit",
+            organization_id="studio-a",
+            email="producer@example.com",
+            role="producer",
+            status="pending",
+            invited_by_actor_id="admin",
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+        )
+        session.add(invitation)
+        session.add(
+            AuditEvent(
+                organization_id="studio-a",
+                actor_type="user",
+                actor_id="admin",
+                action="organization.invitation_created",
+                resource_type="organization_invitation",
+                resource_id=invitation.id,
+            )
+        )
+        session.commit()
+
+        audit_event = session.query(AuditEvent).one()
+        assert audit_event.resource_id == "invitation-for-audit"
 
 
 def test_project_lifecycle_and_tenant_scope() -> None:
