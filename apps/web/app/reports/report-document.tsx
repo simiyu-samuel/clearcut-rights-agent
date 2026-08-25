@@ -115,7 +115,8 @@ function parseReport(markdown: string): ParsedReport {
       }
       continue;
     }
-    if (inDetails && line.startsWith("### ")) {
+    const nextMeaningfulLine = lines.slice(index + 1).find((candidate) => candidate.trim().length > 0)?.trim() ?? "";
+    if (inDetails && line.startsWith("### ") && nextMeaningfulLine.startsWith("- Category:")) {
       if (current) parsed.details.push(current);
       current = { name: clean(line.slice(4)), category: "", scene: "", context: "", status: "—", risk: "—", confidence: "—", summary: "", recommendation: "", reasonCodes: [], evidence: [] };
       continue;
@@ -167,13 +168,14 @@ export function ReportDocument({ projectId, project, report, reports = [report] 
   const currentReport = reports.find((item) => item.id === selectedReportId) ?? report;
   const parsed = useMemo(() => parseReport(currentReport.content_markdown), [currentReport.content_markdown]);
   const total = parsed.summaryRows.length;
-  const reviewed = parsed.summaryRows.filter((row) => row.status !== "—").length;
+  const reviewed = parsed.summaryRows.filter((row) => row.risk !== "—" || row.confidence !== "—").length;
   const attention = parsed.summaryRows.filter((row) => row.status === "—" || !["approved", "complete"].includes(row.status)).length;
   const highRisk = parsed.summaryRows.filter((row) => numericRisk(row.risk) >= 70).length;
   const evidenceCoverage = total ? Math.round((parsed.summaryRows.filter((row) => row.evidence > 0).length / total) * 100) : 0;
+  const researchNeededStatuses = new Set(["needs_more_research", "needs_review", "research_needed", "—"]);
   const statusCounts = [
     { label: "Needs review", value: parsed.summaryRows.filter((row) => row.status === "pending_review").length, className: "attention" },
-    { label: "Needs research", value: parsed.summaryRows.filter((row) => row.status === "needs_more_research" || row.status === "—").length, className: "neutral" },
+    { label: "Needs research", value: parsed.summaryRows.filter((row) => researchNeededStatuses.has(row.status)).length, className: "neutral" },
     { label: "Escalated", value: parsed.summaryRows.filter((row) => row.status === "escalated" || row.status === "rejected").length, className: "critical" },
     { label: "Approved", value: parsed.summaryRows.filter((row) => row.status === "approved").length, className: "good" },
   ];

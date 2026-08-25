@@ -23,7 +23,7 @@ from clearcut_api.models import (
     SourceRecord,
 )
 from clearcut_api.outreach import build_outreach_draft
-from clearcut_api.pdf import build_pdf
+from clearcut_api.pdf import _parse_report, build_pdf
 from clearcut_api.playbooks import playbook_for
 from clearcut_api.providers.parallel_api import ParallelApiProvider
 from clearcut_api.reporting import build_clearance_report
@@ -307,6 +307,62 @@ Evidence:
     assert b"demo-reviewer" in pdf
     assert b"PERMISSION WORK" in pdf
     assert b"rights@example.com" in pdf
+
+
+def test_report_flattens_multiline_evidence_and_pdf_ignores_embedded_headings() -> None:
+    project = Project(
+        organization_id="demo-org",
+        title="The Last Signal",
+        project_type="Feature film",
+    )
+    asset = Asset(
+        id="asset-1",
+        organization_id="demo-org",
+        project_id="project-1",
+        document_id="document-1",
+        canonical_name="Midnight City",
+        category="music",
+        context="A radio plays Midnight City.",
+        source_start=0,
+        source_end=32,
+        extraction_confidence=0.9,
+        risk_status="high_risk",
+        reason_codes=["music_identified"],
+    )
+    source = SourceRecord(
+        research_run_id="run-1",
+        url="https://example.com/rights",
+        title="Rights source",
+        excerpt="A source.\n### Asset\nThis is an excerpt heading, not another asset.",
+        source_quality="fixture",
+    )
+    card = ClearanceCard(
+        organization_id="demo-org",
+        asset_id=asset.id,
+        research_run_id="run-1",
+        generated_by="fixture",
+        status="pending_review",
+        risk_score=90,
+        confidence_score=0.55,
+        summary="Evidence-backed music triage.",
+        recommendation="Request a synchronization/music license.",
+        reason_codes=["music_rights_required"],
+        evidence_count=1,
+        needs_human_review=True,
+    )
+
+    report = build_clearance_report(project, [asset], [card], [source])
+    parsed = _parse_report(report)
+
+    assert "A source. ### Asset This is an excerpt heading, not another asset." in report
+    assert len(parsed.details) == 1
+    assert len(parsed.details[0].evidence) == 1
+
+    legacy_markdown = report.replace(
+        "A source. ### Asset This is an excerpt heading, not another asset.",
+        "A source.\n### Asset\nThis is an excerpt heading, not another asset.",
+    )
+    assert len(_parse_report(legacy_markdown).details) == 1
 
 
 def test_research_run_creates_evidence_backed_clearance_card() -> None:

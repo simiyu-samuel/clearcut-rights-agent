@@ -97,8 +97,11 @@ def _parse_report(markdown: str) -> ParsedReport:
     current: Detail | None = None
 
     lines = markdown.splitlines()
-    for raw_line in lines:
+    for index, raw_line in enumerate(lines):
         line = raw_line.strip()
+        next_meaningful_line = next(
+            (candidate.strip() for candidate in lines[index + 1 :] if candidate.strip()), ""
+        )
         if line.startswith("# "):
             parsed.title = re.sub(
                 r"^ClearCut clearance report\s*[—-]\s*", "", _clean(line[2:]), flags=re.IGNORECASE
@@ -187,7 +190,11 @@ def _parse_report(markdown: str) -> ParsedReport:
                         subject=cells[4],
                     )
                 )
-        elif in_details and line.startswith("### "):
+        elif (
+            in_details
+            and line.startswith("### ")
+            and next_meaningful_line.startswith("- Category:")
+        ):
             if current is not None:
                 parsed.details.append(current)
             current = Detail(name=_clean(line[4:]))
@@ -312,8 +319,8 @@ class _PdfBuilder:
             self.text(line, x, self.y, size, bold=bold, color=color)
             self.y -= leading
 
-    def section(self, number: str, label: str, heading: str) -> None:
-        self.ensure(50)
+    def section(self, number: str, label: str, heading: str, *, minimum_after: int = 0) -> None:
+        self.ensure(50 + minimum_after)
         self.text(number, MARGIN, self.y, 8, bold=True, color=_color(179, 138, 69))
         self.text(label.upper(), MARGIN + 23, self.y, 8, color=_color(126, 119, 109))
         self.y -= 18
@@ -493,15 +500,15 @@ class _PdfBuilder:
             self.text(value, x + 9, self.y - 36, 17, bold=True, color=_color(36, 35, 38))
         self.y -= 68
         self.wrapped("This snapshot consolidates extracted rights-bearing assets, research evidence, model recommendations, and the current human-review boundary. Review unresolved issues before delivery.", size=10, leading=14, width=88, color=_color(75, 71, 67))
-        self.section("02", "Asset register", "Every signal in scope")
+        self.section("02", "Asset register", "Every signal in scope", minimum_after=40)
         self.summary_table()
-        self.section("03", "Detailed review", "Evidence and recommended action")
+        self.section("03", "Detailed review", "Evidence and recommended action", minimum_after=80)
         self.details()
-        self.section("04", "Permission work", "Requests and response state")
+        self.section("04", "Permission work", "Requests and response state", minimum_after=55)
         self.permissions()
-        self.section("05", "Decision log", "Human accountability")
+        self.section("05", "Decision log", "Human accountability", minimum_after=55)
         self.decisions()
-        self.section("06", "Method and limitations", "What this snapshot means")
+        self.section("06", "Method and limitations", "What this snapshot means", minimum_after=55)
         self.wrapped(self.report.notice, size=10, leading=14, width=88, color=_color(75, 71, 67))
         self.wrapped("Evidence is retained as a research snapshot. Recheck unresolved or time-sensitive sources before distribution and record the final human decision in ClearCut.", size=10, leading=14, width=88, color=_color(75, 71, 67))
         for page in self.pages:

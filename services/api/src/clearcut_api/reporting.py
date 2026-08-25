@@ -4,6 +4,10 @@ from datetime import UTC, datetime
 from .models import Approval, Asset, ClearanceCard, OutreachDraft, Project, SourceRecord
 
 
+def _single_line(value: str) -> str:
+    return " ".join(value.split())
+
+
 def build_clearance_report(
     project: Project,
     assets: list[Asset],
@@ -41,38 +45,46 @@ def build_clearance_report(
         card = cards_by_asset.get(asset.id)
         if card is None:
             lines.append(
-                f"| {asset.canonical_name} | {asset.category} | {asset.risk_status} | — | — | 0 |"
+                f"| {_single_line(asset.canonical_name)} | {_single_line(asset.category)} | research_needed | — | — | 0 |"
             )
             continue
         lines.append(
-            f"| {asset.canonical_name} | {asset.category} | {card.status} | "
+            f"| {_single_line(asset.canonical_name)} | {_single_line(asset.category)} | {card.status} | "
             f"{card.risk_score}/100 | {card.confidence_score:.0%} | {card.evidence_count} |"
         )
 
     lines.extend(["", "## Detailed review", ""])
     for asset in assets:
         card = cards_by_asset.get(asset.id)
-        lines.extend([f"### {asset.canonical_name}", "", f"- Category: {asset.category}"])
+        lines.extend(
+            [
+                f"### {_single_line(asset.canonical_name)}",
+                "",
+                f"- Category: {_single_line(asset.category)}",
+            ]
+        )
         if asset.scene_reference:
-            lines.append(f"- Scene: {asset.scene_reference}")
-        lines.append(f"- Context: {asset.context}")
+            lines.append(f"- Scene: {_single_line(asset.scene_reference)}")
+        lines.append(f"- Context: {_single_line(asset.context)}")
         if card is None:
-            lines.extend([f"- Current asset status: `{asset.risk_status}`", ""])
+            lines.extend(["- Current asset status: `research_needed`", ""])
             continue
         lines.extend(
             [
                 f"- Clearance card status: `{card.status}`",
                 f"- Risk score: `{card.risk_score}/100`",
                 f"- Confidence: `{card.confidence_score:.0%}`",
-                f"- Summary: {card.summary}",
-                f"- Recommended next action: {card.recommendation}",
-                f"- Reason codes: {', '.join(card.reason_codes) or 'none'}",
+                f"- Summary: {_single_line(card.summary)}",
+                f"- Recommended next action: {_single_line(card.recommendation)}",
+                f"- Reason codes: {_single_line(', '.join(card.reason_codes) or 'none')}",
                 "",
                 "Evidence:",
             ]
         )
         for source in sources_by_run.get(card.research_run_id, []):
-            lines.append(f"- [{source.title}]({source.url}) — {source.excerpt}")
+            lines.append(
+                f"- [{_single_line(source.title)}]({source.url}) — {_single_line(source.excerpt)}"
+            )
         lines.append("")
 
     lines.extend(["## Decision log", ""])
@@ -88,9 +100,9 @@ def build_clearance_report(
         asset_names = {asset.id: asset.canonical_name for asset in assets}
         for approval in approvals:
             lines.append(
-                f"| {asset_names.get(approval.asset_id, approval.asset_id)} | "
-                f"{approval.decision} | {approval.actor_id} | "
-                f"{approval.created_at.isoformat()} | {approval.note or '—'} |"
+                f"| {_single_line(asset_names.get(approval.asset_id, approval.asset_id))} | "
+                f"{_single_line(approval.decision)} | {_single_line(approval.actor_id)} | "
+                f"{approval.created_at.isoformat()} | {_single_line(approval.note or '—')} |"
             )
 
     lines.extend(["", "## Permission work", ""])
@@ -106,9 +118,9 @@ def build_clearance_report(
         asset_names = {asset.id: asset.canonical_name for asset in assets}
         for draft in drafts:
             lines.append(
-                f"| {asset_names.get(draft.asset_id, draft.asset_id)} | {draft.status} | "
-                f"{draft.recipient_email or draft.recipient_hint} | "
-                f"{draft.due_at.isoformat() if draft.due_at else '—'} | {draft.subject} |"
+                f"| {_single_line(asset_names.get(draft.asset_id, draft.asset_id))} | {draft.status} | "
+                f"{_single_line(draft.recipient_email or draft.recipient_hint)} | "
+                f"{draft.due_at.isoformat() if draft.due_at else '—'} | {_single_line(draft.subject)} |"
             )
 
     lines.extend(
