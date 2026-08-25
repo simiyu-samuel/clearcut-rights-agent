@@ -100,6 +100,7 @@ class ResearchSession(Base):
     status: Mapped[str] = mapped_column(String(40), default="planned", index=True)
     total_tasks: Mapped[int] = mapped_column(Integer, default=0)
     completed_tasks: Mapped[int] = mapped_column(Integer, default=0)
+    findings: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -121,6 +122,7 @@ class ResearchTask(Base):
     source_count: Mapped[int] = mapped_column(Integer, default=0)
     quality_tier: Mapped[str] = mapped_column(String(40), default="unrated")
     gap_codes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    findings: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list)
     error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -152,6 +154,7 @@ class SourceRecord(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     research_run_id: Mapped[str] = mapped_column(String(36), index=True)
+    task_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
     url: Mapped[str] = mapped_column(String(2000))
     title: Mapped[str] = mapped_column(String(500))
     excerpt: Mapped[str] = mapped_column(Text)

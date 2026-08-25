@@ -20,7 +20,26 @@ type ResearchTask = {
   source_count: number;
   quality_tier: string;
   gap_codes: string[];
+  findings: ResearchFinding[];
+  sources: Source[];
   error_code: string | null;
+};
+
+type ResearchFinding = {
+  code: string;
+  kind: "gap" | "conflict" | "quality" | "next_step";
+  severity: "low" | "medium" | "high";
+  title: string;
+  detail: string;
+  action: string;
+};
+
+type Source = {
+  id: string;
+  url: string;
+  title: string;
+  excerpt: string;
+  source_quality: string;
 };
 
 type ResearchSession = {
@@ -31,6 +50,7 @@ type ResearchSession = {
   completed_tasks: number;
   objective: string;
   tasks: ResearchTask[];
+  findings: ResearchFinding[];
 };
 
 const headers = { "x-organization-id": "demo-org" };
@@ -137,6 +157,31 @@ export function ResearchPanel({ projectId }: ResearchPanelProps) {
     }
   }
 
+  async function startFollowUp(session: ResearchSession, task: ResearchTask) {
+    setBusyAsset(session.asset_id);
+    setMessage("");
+    try {
+      const response = await fetch(`${apiUrl}/v1/research-tasks/${task.id}/follow-up`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail ?? "Unable to start the follow-up research.");
+      }
+      const nextSession = await response.json() as ResearchSession;
+      setSessions((current) => [nextSession, ...current]);
+      await waitForSession(nextSession.id);
+      window.dispatchEvent(new Event("clearcut:research-updated"));
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to start the follow-up research.");
+    } finally {
+      setBusyAsset(null);
+    }
+  }
+
   return (
     <section className="research-panel panel" id="research-plan">
       <div className="panel-header research-panel-header">
@@ -169,12 +214,15 @@ export function ResearchPanel({ projectId }: ResearchPanelProps) {
                   <div className="research-session-body">
                     <div className="research-progress-row"><span>Research progress</span><strong>{session.completed_tasks}/{session.total_tasks} angles · {progress}%</strong></div>
                     <div className="research-progress-track"><span style={{ width: `${progress}%` }} /></div>
+                    {session.findings.length > 0 ? <div className="research-findings"><div className="research-findings-label">Review signals</div>{session.findings.map((finding) => <div className={`research-finding ${finding.severity}`} key={finding.code}><div><strong>{finding.title}</strong><p>{finding.detail}</p></div><span>{finding.kind}</span></div>)}</div> : null}
                     <div className="research-task-grid">
                       {session.tasks.map((task) => (
                         <div className="research-task" key={task.id}>
                           <div className="research-task-head"><strong>{task.title}</strong><span className={`task-status ${task.status}`}>{statusLabel(task.status)}</span></div>
                           <div className="research-task-meta"><span>{task.source_count} source{task.source_count === 1 ? "" : "s"}</span><span className={`quality-tier ${task.quality_tier}`}>{qualityLabel(task.quality_tier)}</span></div>
-                          {task.gap_codes.length > 0 ? <div className="research-gaps">{task.gap_codes.map((gap) => <span key={gap}>{statusLabel(gap)}</span>)}</div> : <small className="research-clear">No gaps detected in this angle</small>}
+                          {task.findings.length > 0 ? <div className="research-gaps">{task.findings.map((finding) => <span className={finding.severity} key={finding.code}>{finding.title}</span>)}</div> : <small className="research-clear">No gaps detected in this angle</small>}
+                          {task.sources.length > 0 ? <details className="research-task-evidence"><summary>View evidence ({task.sources.length})</summary>{task.sources.map((source) => <a href={source.url} key={source.id} rel="noreferrer" target="_blank"><strong>{source.title}</strong><small>{source.excerpt}</small></a>)}</details> : null}
+                          {task.findings.length > 0 && ["completed", "partial", "failed"].includes(session.status) ? <button className="table-action research-follow-up" disabled={busy} onClick={() => void startFollowUp(session, task)} type="button">{busy ? "Starting…" : "Start focused follow-up"}</button> : null}
                           {task.error_code ? <small className="research-error">{task.error_code}</small> : null}
                         </div>
                       ))}

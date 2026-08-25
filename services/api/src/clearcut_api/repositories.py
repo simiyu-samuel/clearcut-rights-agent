@@ -212,6 +212,14 @@ class ResearchRunRepository:
         )
         return list(self.session.scalars(statement))
 
+    def list_sources_for_task(self, task_id: str) -> list[SourceRecord]:
+        statement = (
+            select(SourceRecord)
+            .where(SourceRecord.task_id == task_id)
+            .order_by(SourceRecord.retrieved_at.asc())
+        )
+        return list(self.session.scalars(statement))
+
 
 class ResearchSessionRepository:
     def __init__(self, session: Session):

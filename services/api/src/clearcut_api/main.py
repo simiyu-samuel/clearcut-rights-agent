@@ -66,6 +66,7 @@ from .schemas import (
     OutreachDraftRead,
     ProjectCreate,
     ProjectRead,
+    ResearchFollowUpCreate,
     ResearchRunCreate,
     ResearchRunRead,
     ResearchSessionCreate,
@@ -128,8 +129,11 @@ def create_app(
         return project
 
     def research_session_payload(
-        research_session: ResearchSession, tasks: list[ResearchTask]
+        research_session: ResearchSession,
+        tasks: list[ResearchTask],
+        sources_by_task: dict[str, list[SourceRecord]] | None = None,
     ) -> dict[str, object]:
+        sources_by_task = sources_by_task or {}
         return {
             "id": research_session.id,
             "organization_id": research_session.organization_id,
@@ -139,9 +143,31 @@ def create_app(
             "status": research_session.status,
             "total_tasks": research_session.total_tasks,
             "completed_tasks": research_session.completed_tasks,
+            "findings": research_session.findings or [],
             "created_at": research_session.created_at,
             "updated_at": research_session.updated_at,
-            "tasks": tasks,
+            "tasks": [
+                {
+                    "id": task.id,
+                    "organization_id": task.organization_id,
+                    "session_id": task.session_id,
+                    "research_run_id": task.research_run_id,
+                    "angle": task.angle,
+                    "title": task.title,
+                    "objective": task.objective,
+                    "query": task.query,
+                    "status": task.status,
+                    "source_count": task.source_count,
+                    "quality_tier": task.quality_tier,
+                    "gap_codes": task.gap_codes or [],
+                    "findings": task.findings or [],
+                    "sources": sources_by_task.get(task.id, []),
+                    "error_code": task.error_code,
+                    "created_at": task.created_at,
+                    "updated_at": task.updated_at,
+                }
+                for task in tasks
+            ],
         }
 
     def create_research_session_records(
@@ -189,6 +215,62 @@ def create_app(
             ]
         )
         return research_session, tasks
+
+    def sources_by_task(
+        session: Session, tasks: list[ResearchTask]
+    ) -> dict[str, list[SourceRecord]]:
+        repository = ResearchRunRepository(session)
+        return {task.id: repository.list_sources_for_task(task.id) for task in tasks}
+
+    def create_follow_up_records(
+        session: Session,
+        task: ResearchTask,
+        asset: Asset,
+        organization_id: str,
+        objective: str | None,
+    ) -> tuple[ResearchSession, list[ResearchTask]]:
+        gap_text = ", ".join(task.gap_codes) or "independent confirmation"
+        follow_up_objective = objective or (
+            f'Run a focused follow-up for "{asset.canonical_name}" focused on the '
+            f"{task.title.lower()} angle. Resolve these findings: {gap_text}. Return an "
+            "authoritative source, rights contact, or a clearly documented reason evidence "
+            "cannot be confirmed."
+        )
+        run = ResearchRun(
+            organization_id=organization_id,
+            asset_id=asset.id,
+            provider="parallel",
+            operation="focused_follow_up",
+            objective=follow_up_objective,
+            query=f"{task.query} independent authoritative rights source direct contact {gap_text}",
+        )
+        run = ResearchRunRepository(session).create(run)
+        research_session = ResearchSession(
+            organization_id=organization_id,
+            asset_id=asset.id,
+            provider="parallel",
+            objective=follow_up_objective,
+            status="planned",
+            total_tasks=1,
+            completed_tasks=0,
+            findings=[],
+        )
+        research_session = ResearchSessionRepository(session).create(research_session)
+        follow_up_task = ResearchTask(
+            organization_id=organization_id,
+            session_id=research_session.id,
+            research_run_id=run.id,
+            angle=f"{task.angle}_follow_up",
+            title=f"Follow-up · {task.title}",
+            objective=follow_up_objective,
+            query=run.query,
+            status="queued",
+            source_count=0,
+            quality_tier="unrated",
+            gap_codes=[],
+            findings=[],
+        )
+        return research_session, ResearchTaskRepository(session).create_many([follow_up_task])
 
     @app.get("/healthz", tags=["system"])
     def healthz() -> dict[str, str]:
@@ -516,12 +598,15 @@ def create_app(
             project_id, organization_id
         )
         tasks = ResearchTaskRepository(session)
-        return [
-            research_session_payload(
-                research_session, tasks.list_for_session(research_session.id, organization_id)
+        payloads = []
+        for research_session in sessions:
+            session_tasks = tasks.list_for_session(research_session.id, organization_id)
+            payloads.append(
+                research_session_payload(
+                    research_session, session_tasks, sources_by_task(session, session_tasks)
+                )
             )
-            for research_session in sessions
-        ]
+        return payloads
 
     @app.get(
         "/v1/research-sessions/{session_id}",
@@ -537,7 +622,7 @@ def create_app(
         if research_session is None:
             raise HTTPException(status_code=404, detail="research_session_not_found")
         tasks = ResearchTaskRepository(session).list_for_session(session_id, organization_id)
-        return research_session_payload(research_session, tasks)
+        return research_session_payload(research_session, tasks, sources_by_task(session, tasks))
 
     @app.post(
         "/v1/research-sessions/{session_id}/retry",
@@ -563,6 +648,49 @@ def create_app(
         for task in tasks:
             background_tasks.add_task(
                 process_research_task, db, task.id, organization_id, settings
+            )
+        return research_session_payload(research_session, tasks)
+
+    @app.post(
+        "/v1/research-tasks/{task_id}/follow-up",
+        response_model=ResearchSessionRead,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["research"],
+    )
+    def create_research_follow_up(
+        task_id: str,
+        payload: ResearchFollowUpCreate,
+        background_tasks: BackgroundTasks,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        task = ResearchTaskRepository(session).get(task_id, organization_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="research_task_not_found")
+        parent_session = ResearchSessionRepository(session).get(task.session_id, organization_id)
+        if parent_session is None:
+            raise HTTPException(status_code=404, detail="research_session_not_found")
+        asset = AssetRepository(session).get(parent_session.asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        active_session = next(
+            (
+                item
+                for item in ResearchSessionRepository(session).list_for_asset(
+                    asset.id, organization_id
+                )
+                if item.status in {"planned", "running"}
+            ),
+            None,
+        )
+        if active_session is not None:
+            raise HTTPException(status_code=409, detail="research_session_already_running")
+        research_session, tasks = create_follow_up_records(
+            session, task, asset, organization_id, payload.objective
+        )
+        for follow_up_task in tasks:
+            background_tasks.add_task(
+                process_research_task, db, follow_up_task.id, organization_id, settings
             )
         return research_session_payload(research_session, tasks)
 

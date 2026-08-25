@@ -124,17 +124,31 @@ class ResearchSessionCreate(BaseModel):
     objective: str | None = Field(default=None, min_length=10, max_length=2000)
 
 
+class ResearchFollowUpCreate(BaseModel):
+    objective: str | None = Field(default=None, min_length=10, max_length=2000)
+
+
 class SourceRecordRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     research_run_id: str
+    task_id: str | None
     url: str
     title: str
     excerpt: str
     source_quality: str
     provider_session_id: str | None
     retrieved_at: datetime
+
+
+class ResearchFindingRead(BaseModel):
+    code: str
+    kind: Literal["gap", "conflict", "quality", "next_step"]
+    severity: Literal["low", "medium", "high"]
+    title: str
+    detail: str
+    action: str
 
 
 class ResearchRunRead(BaseModel):
@@ -169,6 +183,8 @@ class ResearchTaskRead(BaseModel):
     source_count: int = Field(ge=0)
     quality_tier: str
     gap_codes: list[str]
+    findings: list[ResearchFindingRead]
+    sources: list[SourceRecordRead] = Field(default_factory=list)
     error_code: str | None
     created_at: datetime
     updated_at: datetime
@@ -185,6 +201,7 @@ class ResearchSessionRead(BaseModel):
     status: ResearchSessionStatus
     total_tasks: int = Field(ge=0)
     completed_tasks: int = Field(ge=0)
+    findings: list[ResearchFindingRead] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     tasks: list[ResearchTaskRead] = Field(default_factory=list)

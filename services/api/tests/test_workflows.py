@@ -419,6 +419,9 @@ def test_multi_angle_research_session_aggregates_tasks_and_evidence() -> None:
         assert stored_session.completed_tasks == 4
         assert all(task.status == "completed" for task in stored_tasks)
         assert all(task.quality_tier == "demo" for task in stored_tasks)
+        assert all(task.findings for task in stored_tasks)
         assert stored_run is not None and stored_run.status == "completed"
         assert len(sources) == 4
+        assert {source.task_id for source in sources} == {task.id for task in stored_tasks}
+        assert stored_session.findings
         assert card is not None and card.evidence_count == 4

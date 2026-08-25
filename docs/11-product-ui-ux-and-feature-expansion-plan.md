@@ -453,7 +453,7 @@ Highest value for the next demo and immediate credibility.
 - [x] research plan visible before execution;
 - [x] source quality and evidence-gap indicators;
 - [x] re-run/recheck control for a new research pass;
-- [ ] conflict detection and missing-evidence task generation;
+- [x] structured conflict signals and focused missing-evidence follow-ups;
 - [ ] scheduled source rechecks;
 - right-sized category playbooks;
 - provider trace panel for demo mode and admin mode.

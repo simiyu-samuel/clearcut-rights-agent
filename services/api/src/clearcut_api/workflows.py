@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from .agent_runtime import AgentRuntimeError, build_clearance_agent
 from .config import Settings
@@ -102,6 +103,133 @@ def research_gaps(sources: list[SourceRecord]) -> list[str]:
     return gaps
 
 
+def research_findings(sources: list[SourceRecord]) -> list[dict[str, str]]:
+    if not sources:
+        return [
+            {
+                "code": "no_evidence",
+                "kind": "gap",
+                "severity": "high",
+                "title": "No evidence returned",
+                "detail": "This angle did not produce a source record that can support a clearance decision.",
+                "action": "Run a focused follow-up search with an authoritative source or rights contact.",
+            }
+        ]
+
+    findings: list[dict[str, str]] = []
+    quality = source_quality_tier(sources)
+    if quality == "demo":
+        findings.append(
+            {
+                "code": "synthetic_evidence",
+                "kind": "quality",
+                "severity": "medium",
+                "title": "Synthetic evidence",
+                "detail": "This result came from the deterministic fixture provider and is not production evidence.",
+                "action": "Use live Parallel research before relying on this finding.",
+            }
+        )
+    elif quality != "strong":
+        findings.append(
+            {
+                "code": "source_quality_unverified",
+                "kind": "quality",
+                "severity": "medium",
+                "title": "Source needs verification",
+                "detail": "The angle has a search lead but no extracted authoritative source record.",
+                "action": "Open the source and confirm the rights statement or contact path manually.",
+            }
+        )
+    if len(sources) == 1:
+        findings.append(
+            {
+                "code": "single_source_confirmation",
+                "kind": "gap",
+                "severity": "medium",
+                "title": "Single-source confirmation",
+                "detail": "Only one source supports this angle, so ownership or permission details may be incomplete.",
+                "action": "Run a follow-up pass for an independent confirmation.",
+            }
+        )
+    findings.append(
+        {
+            "code": "human_rights_verification_required",
+            "kind": "next_step",
+            "severity": "low",
+            "title": "Human verification required",
+            "detail": "Research evidence informs workflow triage but does not establish legal clearance.",
+            "action": "Have the producer or legal reviewer confirm the next rights action.",
+        }
+    )
+    return findings
+
+
+def session_findings(
+    tasks: list[object], sources: list[SourceRecord]
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    for task in tasks:
+        findings.extend(getattr(task, "findings", []) or [])
+
+    urls_by_task: dict[str, set[str]] = {}
+    for source in sources:
+        if source.task_id:
+            urls_by_task.setdefault(source.url, set()).add(source.task_id)
+    if any(len(task_ids) > 1 for task_ids in urls_by_task.values()):
+        findings.append(
+            {
+                "code": "source_reused_across_angles",
+                "kind": "quality",
+                "severity": "medium",
+                "title": "Evidence reused across angles",
+                "detail": "At least one URL appeared in multiple research angles and should not be treated as independent confirmation.",
+                "action": "Confirm the key rights fact with an independent authoritative source.",
+            }
+        )
+
+    restriction_terms = (
+        "exclusive",
+        "restricted",
+        "not permitted",
+        "cannot use",
+        "disputed",
+        "unavailable",
+    )
+    if any(
+        term in f"{source.title} {source.excerpt}".lower()
+        for source in sources
+        for term in restriction_terms
+    ):
+        findings.append(
+            {
+                "code": "usage_restriction_signal",
+                "kind": "conflict",
+                "severity": "high",
+                "title": "Usage restriction signal",
+                "detail": "Source text contains a restriction or conflict signal that may affect the intended production use.",
+                "action": "Escalate the exact restriction to a rights reviewer before approval.",
+            }
+        )
+
+    domains = {urlparse(source.url).netloc for source in sources if urlparse(source.url).netloc}
+    if len(sources) > 1 and len(domains) == 1:
+        findings.append(
+            {
+                "code": "single_domain_confirmation",
+                "kind": "quality",
+                "severity": "medium",
+                "title": "Single-domain evidence set",
+                "detail": "All evidence came from one domain, so the research has limited independent corroboration.",
+                "action": "Seek a second authoritative source or direct rights-holder confirmation.",
+            }
+        )
+
+    unique: dict[str, dict[str, str]] = {}
+    for finding in findings:
+        unique.setdefault(finding["code"], finding)
+    return list(unique.values())
+
+
 def make_research_provider(settings: Settings) -> ResearchProvider:
     if settings.parallel_mode == "live":
         if not settings.parallel_api_key:
@@ -175,6 +303,7 @@ async def finalize_research_session(
             )
             return
         stored_sources = ResearchRunRepository(session).list_sources(run.id)
+        aggregate_findings = session_findings(tasks, stored_sources)
         existing_card = ClearanceCardRepository(session).get_for_run(run.id, organization_id)
         session_status = (
             "partial"
@@ -221,7 +350,10 @@ async def finalize_research_session(
 
     with database.session_factory() as session:
         ResearchSessionRepository(session).update(
-            session_id, status=session_status, completed_tasks=completed_tasks
+            session_id,
+            status=session_status,
+            completed_tasks=completed_tasks,
+            findings=aggregate_findings,
         )
         ResearchRunRepository(session).update(run.id, status=session_status)
 
@@ -272,6 +404,7 @@ async def process_research_task(
             sources = [
                 SourceRecord(
                     research_run_id=run_id,
+                    task_id=task_id,
                     url=result.url,
                     title=result.title,
                     excerpt=result.excerpt,
@@ -291,6 +424,7 @@ async def process_research_task(
                 source_count=len(sources),
                 quality_tier=source_quality_tier(sources),
                 gap_codes=research_gaps(sources),
+                findings=research_findings(sources),
                 error_code=None,
             )
             tasks = ResearchTaskRepository(session).list_for_session(session_id, organization_id)
@@ -308,6 +442,16 @@ async def process_research_task(
                 status="failed",
                 error_code=exc.code,
                 gap_codes=["provider_error", "retry_recommended"],
+                findings=[
+                    {
+                        "code": "provider_error",
+                        "kind": "gap",
+                        "severity": "high",
+                        "title": "Provider request failed",
+                        "detail": str(exc),
+                        "action": "Retry this angle after checking provider availability.",
+                    }
+                ],
             )
             tasks = ResearchTaskRepository(session).list_for_session(session_id, organization_id)
             ResearchSessionRepository(session).update(
