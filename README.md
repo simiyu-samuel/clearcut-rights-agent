@@ -2,15 +2,23 @@
 
 **AI rights clearance for film and television.**
 
+<p align="center">
+  <img src="assets/brand/clearcut-logo.png" alt="ClearCut logo" width="620">
+</p>
+
+<p align="center"><em>Turn scripts and rough cuts into evidence-backed rights plans.</em></p>
+
+![ClearCut Devpost thumbnail](assets/brand/clearcut-devpost-thumbnail.png)
+
 ClearCut turns a screenplay, shot list, or rough cut into a structured rights-clearance plan. It identifies potentially protected assets, researches likely ownership and licensing signals, ranks risk with explainable evidence, and prepares the next human-approved action.
 
 > ClearCut helps teams prepare and manage rights-clearance work. It does not provide legal advice or declare an asset legally cleared.
 
 ## Project status
 
-This repository has a working fixture-mode vertical slice for the Agentic Cinema hackathon. Google Cloud and Parallel credentials are now secured for staging; the next infrastructure gate is deploying the persistent Cloud SQL/Cloud Storage-backed services.
+This repository contains a deployed staging vertical slice for the Agentic Cinema hackathon. The Google Cloud and Parallel integrations are connected, and the production-shaped research, review, permission-work, audit, and reporting flows have been exercised end to end.
 
-The production-shaped workspace batch is implemented locally and is awaiting one consolidated staging release. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions, [docs/12-batch-release-plan.md](docs/12-batch-release-plan.md) for the release gate, and [docs/13-operations-runbook.md](docs/13-operations-runbook.md) for operating procedures.
+The latest local changes include styled report/PDF rendering fixes and submission brand assets. Real user authentication, the tabbed project workspace, and video-analysis ingestion are the next development tracks; deployment is intentionally paused until the video milestone is complete. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions, [docs/12-batch-release-plan.md](docs/12-batch-release-plan.md) for the release gate, and [docs/13-operations-runbook.md](docs/13-operations-runbook.md) for operating procedures.
 
 ## Primary partner track
 
@@ -48,6 +56,12 @@ Clearance report + outreach actions
 - [Deployment infrastructure](infra/README.md)
 - [Batch release plan](docs/12-batch-release-plan.md)
 - [Operations runbook](docs/13-operations-runbook.md)
+
+## Brand assets
+
+- [Primary logo](assets/brand/clearcut-logo.png)
+- [Favicon and app mark](assets/brand/clearcut-favicon.png)
+- [Devpost submission thumbnail](assets/brand/clearcut-devpost-thumbnail.png)
 
 ## License
 
