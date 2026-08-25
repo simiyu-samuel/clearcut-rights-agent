@@ -5,7 +5,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app/services/api/src \
     PORT=8080 \
-    DATABASE_URL=sqlite:////tmp/clearcut.db \
     STORAGE_ROOT=/tmp/clearcut/uploads
 
 WORKDIR /app
