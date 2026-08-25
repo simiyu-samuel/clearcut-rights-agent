@@ -40,7 +40,7 @@ This release train intentionally keeps staging unchanged while the remaining pro
 
 - Firebase/Identity Platform sign-in with verified bearer tokens, supporting Google and Email/Password providers;
 - active-membership tenant selection and role enforcement at the API boundary;
-- first-workspace onboarding and admin membership management;
+- first-workspace onboarding and email-based admin invitations with automatic membership activation;
 - consistent authenticated API client and signed-out/configuration states;
 - dedicated project workspace routes for source, inventory, research, review, requests, reports, activity, and settings;
 - live workspace metrics and removal of static dashboard fallback numbers.

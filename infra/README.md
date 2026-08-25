@@ -64,7 +64,7 @@ gcloud services enable identitytoolkit.googleapis.com --project=${PROJECT_ID}
 
 Create a Web app in the Firebase project and copy its public `apiKey`, `authDomain`, `projectId`, `appId`, and (if shown) `messagingSenderId` into the `_NEXT_PUBLIC_FIREBASE_*` Cloud Build substitutions. These values are safe to expose in a browser bundle; server credentials and refresh tokens are not.
 
-The first authenticated user can create an organization from the web onboarding screen and is made its `admin`. Administrators can then add memberships from Workspace settings using the member's Firebase user ID. The local development contract remains explicit demo mode (`AUTH_MODE=demo` and `NEXT_PUBLIC_AUTH_MODE=demo`); do not use that mode for a shared or production deployment.
+The first authenticated user can create an organization from the web onboarding screen and is made its `admin`. Administrators invite teammates from Workspace settings by email and role; when the invited person signs in with that email, ClearCut automatically activates the membership. Firebase actor IDs remain an internal implementation detail and are never required in the UI. The local development contract remains explicit demo mode (`AUTH_MODE=demo` and `NEXT_PUBLIC_AUTH_MODE=demo`); do not use that mode for a shared or production deployment.
 
 ## Database migrations
 

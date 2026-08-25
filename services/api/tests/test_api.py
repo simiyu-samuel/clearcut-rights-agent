@@ -6,8 +6,21 @@ from sqlalchemy.pool import StaticPool
 
 from clearcut_api.db import Database
 from clearcut_api.main import create_app
-from clearcut_api.models import Approval, Asset, Base, ClearanceCard, Job, Project
-from clearcut_api.repositories import ApprovalRepository, JobRepository, ProjectRepository
+from clearcut_api.models import (
+    Approval,
+    Asset,
+    Base,
+    ClearanceCard,
+    Job,
+    OrganizationInvitation,
+    Project,
+)
+from clearcut_api.repositories import (
+    ApprovalRepository,
+    JobRepository,
+    OrganizationInvitationRepository,
+    ProjectRepository,
+)
 
 
 def make_database() -> Database:
@@ -27,6 +40,8 @@ def test_system_routes_are_registered() -> None:
     assert {
         "/v1/auth/me",
         "/v1/organizations",
+        "/v1/organizations/current/invitations",
+        "/v1/organizations/current/invitations/{invitation_id}/revoke",
         "/v1/projects/{project_id}/approvals",
         "/v1/assets/{asset_id}/approvals",
         "/v1/projects/{project_id}/delivery-readiness",
@@ -41,6 +56,35 @@ def test_system_routes_are_registered() -> None:
         "/v1/research-rechecks/run-due",
     }.issubset(routes)
     assert app.title == "ClearCut API"
+
+
+def test_invitation_repository_matches_pending_email_only() -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        repository = OrganizationInvitationRepository(session)
+        pending = repository.create(
+            OrganizationInvitation(
+                organization_id="studio-a",
+                email="producer@example.com",
+                role="producer",
+                status="pending",
+                invited_by_actor_id="admin",
+                expires_at=datetime.now(UTC) + timedelta(days=7),
+            )
+        )
+        repository.create(
+            OrganizationInvitation(
+                organization_id="studio-a",
+                email="other@example.com",
+                role="viewer",
+                status="pending",
+                invited_by_actor_id="admin",
+                expires_at=datetime.now(UTC) + timedelta(days=7),
+            )
+        )
+
+        matches = repository.list_pending_for_email("producer@example.com")
+        assert [item.id for item in matches] == [pending.id]
 
 
 def test_project_lifecycle_and_tenant_scope() -> None:

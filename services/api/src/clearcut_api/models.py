@@ -40,6 +40,25 @@ class Membership(Base):
     )
 
 
+class OrganizationInvitation(Base):
+    __tablename__ = "organization_invitations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    display_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    role: Mapped[str] = mapped_column(String(50), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    invited_by_actor_id: Mapped[str] = mapped_column(String(120))
+    accepted_by_actor_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
 class Project(Base):
     __tablename__ = "projects"
 

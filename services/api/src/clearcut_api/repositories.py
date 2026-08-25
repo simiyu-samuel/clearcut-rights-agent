@@ -14,6 +14,7 @@ from .models import (
     Membership,
     Notification,
     Organization,
+    OrganizationInvitation,
     OutreachDraft,
     Project,
     ProjectAttachment,
@@ -74,6 +75,57 @@ class MembershipRepository:
         self.session.commit()
         self.session.refresh(membership)
         return membership
+
+
+class OrganizationInvitationRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get(self, invitation_id: str, organization_id: str) -> OrganizationInvitation | None:
+        statement = select(OrganizationInvitation).where(
+            OrganizationInvitation.id == invitation_id,
+            OrganizationInvitation.organization_id == organization_id,
+        )
+        return self.session.scalar(statement)
+
+    def list_for_organization(self, organization_id: str) -> list[OrganizationInvitation]:
+        statement = (
+            select(OrganizationInvitation)
+            .where(OrganizationInvitation.organization_id == organization_id)
+            .order_by(OrganizationInvitation.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def list_pending_for_email(self, email: str) -> list[OrganizationInvitation]:
+        statement = (
+            select(OrganizationInvitation)
+            .where(
+                OrganizationInvitation.email == email,
+                OrganizationInvitation.status == "pending",
+            )
+            .order_by(OrganizationInvitation.created_at.asc())
+        )
+        return list(self.session.scalars(statement))
+
+    def pending_for_email(
+        self, organization_id: str, email: str
+    ) -> OrganizationInvitation | None:
+        statement = (
+            select(OrganizationInvitation)
+            .where(
+                OrganizationInvitation.organization_id == organization_id,
+                OrganizationInvitation.email == email,
+                OrganizationInvitation.status == "pending",
+            )
+            .order_by(OrganizationInvitation.created_at.desc())
+        )
+        return self.session.scalar(statement)
+
+    def create(self, invitation: OrganizationInvitation) -> OrganizationInvitation:
+        self.session.add(invitation)
+        self.session.commit()
+        self.session.refresh(invitation)
+        return invitation
 
 
 class ProjectRepository:

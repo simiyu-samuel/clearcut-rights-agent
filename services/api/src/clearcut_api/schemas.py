@@ -31,6 +31,7 @@ OutreachDraftStatus = Literal[
 ReportStatus = Literal["ready", "failed"]
 MembershipRole = Literal["admin", "producer", "coordinator", "legal_reviewer", "post_supervisor", "viewer"]
 MembershipStatus = Literal["active", "invited", "suspended"]
+InvitationStatus = Literal["pending", "accepted", "revoked", "expired"]
 RecheckStatus = Literal["active", "paused"]
 
 
@@ -81,9 +82,26 @@ class MembershipRead(BaseModel):
     updated_at: datetime
 
 
-class MembershipCreate(BaseModel):
-    actor_id: str = Field(min_length=2, max_length=120)
-    display_name: str = Field(min_length=2, max_length=160)
+class OrganizationInvitationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    email: str
+    display_name: str | None
+    role: MembershipRole
+    status: InvitationStatus
+    invited_by_actor_id: str
+    accepted_by_actor_id: str | None
+    expires_at: datetime
+    accepted_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrganizationInvitationCreate(BaseModel):
+    email: str = Field(min_length=5, max_length=320)
+    display_name: str | None = Field(default=None, max_length=160)
     role: MembershipRole = "viewer"
 
 

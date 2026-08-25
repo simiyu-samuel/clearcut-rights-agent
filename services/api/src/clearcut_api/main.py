@@ -42,6 +42,7 @@ from .models import (
     Membership,
     Notification,
     Organization,
+    OrganizationInvitation,
     OutreachDraft,
     Project,
     ProjectAttachment,
@@ -69,6 +70,7 @@ from .repositories import (
     JobRepository,
     MembershipRepository,
     NotificationRepository,
+    OrganizationInvitationRepository,
     OrganizationRepository,
     OutreachDraftRepository,
     ProjectAttachmentRepository,
@@ -99,10 +101,11 @@ from .schemas import (
     DocumentDiffRead,
     DocumentRead,
     JobRead,
-    MembershipCreate,
     MembershipRead,
     NotificationRead,
     OrganizationCreate,
+    OrganizationInvitationCreate,
+    OrganizationInvitationRead,
     OrganizationRead,
     OutreachDraftCreate,
     OutreachDraftRead,
@@ -433,6 +436,49 @@ def create_app(
         identity: AuthenticatedIdentity = Depends(get_auth_identity),
         session: Session = Depends(get_db),
     ) -> dict[str, object]:
+        if settings.auth_mode != "demo" and identity.email:
+            normalized_email = identity.email.strip().lower()
+            now = datetime.now(UTC)
+            invitation_repository = OrganizationInvitationRepository(session)
+            pending_invitations = invitation_repository.list_pending_for_email(normalized_email)
+            changed = False
+            for invitation in pending_invitations:
+                if invitation.expires_at <= now:
+                    invitation.status = "expired"
+                    invitation.updated_at = now
+                    changed = True
+                    continue
+                existing = MembershipRepository(session).get(
+                    invitation.organization_id, identity.actor_id
+                )
+                if existing is None:
+                    session.add(
+                        Membership(
+                            organization_id=invitation.organization_id,
+                            actor_id=identity.actor_id,
+                            display_name=invitation.display_name or identity.display_name,
+                            role=invitation.role,
+                            status="active",
+                        )
+                    )
+                invitation.status = "accepted"
+                invitation.accepted_by_actor_id = identity.actor_id
+                invitation.accepted_at = now
+                invitation.updated_at = now
+                session.add(
+                    AuditEvent(
+                        organization_id=invitation.organization_id,
+                        actor_type="user",
+                        actor_id=identity.actor_id,
+                        action="organization.invitation_accepted",
+                        resource_type="organization_invitation",
+                        resource_id=invitation.id,
+                        metadata_json=json.dumps({"email": normalized_email}),
+                    )
+                )
+                changed = True
+            if changed:
+                session.commit()
         memberships = MembershipRepository(session).list_for_actor(identity.actor_id)
         if settings.auth_mode == "demo" and not memberships:
             now = datetime.now(UTC)
@@ -589,25 +635,108 @@ def create_app(
             )
         ]
 
-    @app.post(
-        "/v1/organizations/current/members",
-        response_model=MembershipRead,
-        status_code=status.HTTP_201_CREATED,
+    @app.get(
+        "/v1/organizations/current/invitations",
+        response_model=list[OrganizationInvitationRead],
         tags=["organization"],
     )
-    def create_member(
-        payload: MembershipCreate,
+    def list_invitations(
         x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
-    ) -> Membership:
+    ) -> list[OrganizationInvitation]:
+        require_role(session, organization_id, x_actor_id or "demo-user", {"admin"})
+        now = datetime.now(UTC)
+        invitations = OrganizationInvitationRepository(session).list_for_organization(organization_id)
+        changed = False
+        for invitation in invitations:
+            if invitation.status == "pending" and invitation.expires_at <= now:
+                invitation.status = "expired"
+                invitation.updated_at = now
+                changed = True
+        if changed:
+            session.commit()
+        return invitations
+
+    @app.post(
+        "/v1/organizations/current/invitations",
+        response_model=OrganizationInvitationRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["organization"],
+    )
+    def create_invitation(
+        payload: OrganizationInvitationCreate,
+        x_actor_id: str | None = Depends(get_actor_id),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> OrganizationInvitation:
         actor_id = x_actor_id or "demo-user"
         require_role(session, organization_id, actor_id, {"admin"})
-        if MembershipRepository(session).get(organization_id, payload.actor_id):
-            raise HTTPException(status_code=409, detail="membership_already_exists")
-        return MembershipRepository(session).create(
-            Membership(organization_id=organization_id, **payload.model_dump(), status="active")
+        email = payload.email.strip().lower()
+        if "@" not in email:
+            raise HTTPException(status_code=422, detail="valid_email_required")
+        repository = OrganizationInvitationRepository(session)
+        existing = repository.pending_for_email(organization_id, email)
+        if existing is not None and existing.expires_at > datetime.now(UTC):
+            raise HTTPException(status_code=409, detail="invitation_already_pending")
+        invitation = OrganizationInvitation(
+            organization_id=organization_id,
+            email=email,
+            display_name=payload.display_name.strip() if payload.display_name else None,
+            role=payload.role,
+            status="pending",
+            invited_by_actor_id=actor_id,
+            expires_at=datetime.now(UTC) + timedelta(days=7),
         )
+        session.add(invitation)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="organization.invitation_created",
+                resource_type="organization_invitation",
+                resource_id=invitation.id,
+                metadata_json=json.dumps({"email": email, "role": payload.role}),
+            )
+        )
+        session.commit()
+        session.refresh(invitation)
+        return invitation
+
+    @app.post(
+        "/v1/organizations/current/invitations/{invitation_id}/revoke",
+        response_model=OrganizationInvitationRead,
+        tags=["organization"],
+    )
+    def revoke_invitation(
+        invitation_id: str,
+        x_actor_id: str | None = Depends(get_actor_id),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> OrganizationInvitation:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin"})
+        invitation = OrganizationInvitationRepository(session).get(invitation_id, organization_id)
+        if invitation is None:
+            raise HTTPException(status_code=404, detail="invitation_not_found")
+        if invitation.status != "pending":
+            raise HTTPException(status_code=409, detail="invitation_not_pending")
+        invitation.status = "revoked"
+        invitation.updated_at = datetime.now(UTC)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="organization.invitation_revoked",
+                resource_type="organization_invitation",
+                resource_id=invitation.id,
+            )
+        )
+        session.commit()
+        session.refresh(invitation)
+        return invitation
 
     @app.get(
         "/v1/workspace/overview",
