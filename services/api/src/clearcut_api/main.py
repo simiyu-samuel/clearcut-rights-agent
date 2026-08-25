@@ -1,5 +1,10 @@
+import difflib
 import json
+import logging
+import secrets
+import time
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -23,55 +28,96 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .db import Database, create_database
 from .models import (
+    ApiKey,
     Approval,
     Asset,
+    AssetComment,
     AuditEvent,
     ClearanceCard,
     ClearanceReport,
     Document,
     Job,
+    Membership,
+    Notification,
+    Organization,
     OutreachDraft,
     Project,
+    ProjectAttachment,
+    ResearchRecheck,
     ResearchRun,
     ResearchSession,
     ResearchTask,
+    ReviewShare,
     SourceRecord,
+    WebhookEndpoint,
 )
 from .outreach import build_outreach_draft
 from .pdf import build_pdf
+from .playbooks import playbook_for
 from .reporting import build_clearance_report
 from .repositories import (
+    ApiKeyRepository,
     ApprovalRepository,
+    AssetCommentRepository,
     AssetRepository,
+    AuditRepository,
     ClearanceCardRepository,
     ClearanceReportRepository,
     DocumentRepository,
     JobRepository,
+    MembershipRepository,
+    NotificationRepository,
+    OrganizationRepository,
     OutreachDraftRepository,
+    ProjectAttachmentRepository,
     ProjectRepository,
+    ResearchRecheckRepository,
     ResearchRunRepository,
     ResearchSessionRepository,
     ResearchTaskRepository,
+    ReviewShareRepository,
+    WebhookEndpointRepository,
 )
 from .schemas import (
     AnalysisRunCreate,
+    ApiKeyCreate,
+    ApiKeyRead,
     ApprovalCreate,
     ApprovalRead,
+    AssetCommentCreate,
+    AssetCommentRead,
     AssetRead,
+    AssetUpdate,
+    AuditEventRead,
     ClearanceCardRead,
     ClearanceReportRead,
+    DeliveryReadinessRead,
+    DocumentDiffRead,
     DocumentRead,
     JobRead,
+    MembershipCreate,
+    MembershipRead,
+    NotificationRead,
+    OrganizationRead,
     OutreachDraftCreate,
     OutreachDraftRead,
+    OutreachDraftUpdate,
+    PlaybookRead,
+    ProjectAttachmentRead,
     ProjectCreate,
     ProjectRead,
     ResearchFollowUpCreate,
+    ResearchRecheckCreate,
+    ResearchRecheckRead,
     ResearchRunCreate,
     ResearchRunRead,
     ResearchSessionCreate,
     ResearchSessionRead,
+    ReviewShareCreate,
+    ReviewShareRead,
     SourceRecordRead,
+    WebhookEndpointCreate,
+    WebhookEndpointRead,
     WorkspaceOverviewRead,
 )
 from .storage import ObjectStore, create_object_store
@@ -84,6 +130,7 @@ from .workflows import (
 
 ALLOWED_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
 ALLOWED_TEXT_MIME_TYPES = {"text/plain", "text/markdown", "application/octet-stream"}
+request_logger = logging.getLogger("clearcut.request")
 
 
 def create_app(
@@ -115,12 +162,64 @@ def create_app(
     app.state.database = db
     app.state.object_store = object_store
 
+    @app.middleware("http")
+    async def correlation_middleware(request: Request, call_next):
+        correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
+        request.state.correlation_id = correlation_id
+        started_at = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            request_logger.exception(
+                "request_failed method=%s path=%s correlation_id=%s",
+                request.method,
+                request.url.path,
+                correlation_id,
+            )
+            raise
+        response.headers["x-correlation-id"] = correlation_id
+        request_logger.info(
+            "request_complete method=%s path=%s status=%s duration_ms=%s correlation_id=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            round((time.perf_counter() - started_at) * 1000, 2),
+            correlation_id,
+        )
+        return response
+
     def get_db():
         with db.session_factory() as session:
             yield session
 
     def get_organization_id(x_organization_id: str | None = Header(default=None)) -> str:
         return x_organization_id or settings.default_organization_id
+
+    def get_actor_id(x_actor_id: str | None = Header(default=None)) -> str:
+        return x_actor_id or "demo-user"
+
+    def require_role(
+        session: Session, organization_id: str, actor_id: str, allowed_roles: set[str]
+    ) -> Membership:
+        membership = MembershipRepository(session).get(organization_id, actor_id)
+        if membership is None and organization_id == settings.default_organization_id:
+            fallback_roles = {
+                "demo-user": "admin",
+                "demo-producer": "producer",
+                "demo-reviewer": "legal_reviewer",
+            }
+            fallback_role = fallback_roles.get(actor_id)
+            if fallback_role in allowed_roles:
+                return Membership(
+                    organization_id=organization_id,
+                    actor_id=actor_id,
+                    display_name=actor_id,
+                    role=fallback_role,
+                    status="active",
+                )
+        if membership is None or membership.role not in allowed_roles:
+            raise HTTPException(status_code=403, detail="insufficient_workspace_role")
+        return membership
 
     def require_project(session: Session, project_id: str, organization_id: str) -> Project:
         project = ProjectRepository(session).get(project_id, organization_id)
@@ -309,11 +408,28 @@ def create_app(
     )
     def create_project(
         payload: ProjectCreate,
+        x_actor_id: str | None = Header(default=None),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Project:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator"})
         project = Project(organization_id=organization_id, **payload.model_dump())
-        return ProjectRepository(session).create(project)
+        created = ProjectRepository(session).create(project)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="project.created",
+                resource_type="project",
+                resource_id=created.id,
+                metadata_json=json.dumps({"title": created.title}),
+            )
+        )
+        session.commit()
+        session.refresh(created)
+        return created
 
     @app.get("/v1/projects", response_model=list[ProjectRead], tags=["projects"])
     def list_projects(
@@ -321,6 +437,78 @@ def create_app(
         organization_id: str = Depends(get_organization_id),
     ) -> list[Project]:
         return ProjectRepository(session).list(organization_id)
+
+    @app.get(
+        "/v1/organizations/current",
+        response_model=OrganizationRead,
+        tags=["organization"],
+    )
+    def get_current_organization(
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Organization:
+        organization = OrganizationRepository(session).get(organization_id)
+        if organization is not None:
+            return organization
+        now = datetime.now(UTC)
+        return Organization(
+            id=organization_id,
+            name="Studio Meridian" if organization_id == "demo-org" else organization_id,
+            slug=organization_id,
+            created_at=now,
+            updated_at=now,
+        )
+
+    @app.get(
+        "/v1/organizations/current/members",
+        response_model=list[MembershipRead],
+        tags=["organization"],
+    )
+    def list_members(
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[Membership]:
+        members = MembershipRepository(session).list_for_organization(organization_id)
+        if members:
+            return members
+        now = datetime.now(UTC)
+        return [
+            Membership(
+                id=f"demo-membership-{actor_id}",
+                organization_id=organization_id,
+                actor_id=actor_id,
+                display_name=display_name,
+                role=role,
+                status="active",
+                created_at=now,
+                updated_at=now,
+            )
+            for actor_id, display_name, role in (
+                ("demo-user", "Studio Admin", "admin"),
+                ("demo-producer", "Demo Producer", "producer"),
+                ("demo-reviewer", "Legal Reviewer", "legal_reviewer"),
+            )
+        ]
+
+    @app.post(
+        "/v1/organizations/current/members",
+        response_model=MembershipRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["organization"],
+    )
+    def create_member(
+        payload: MembershipCreate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Membership:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin"})
+        if MembershipRepository(session).get(organization_id, payload.actor_id):
+            raise HTTPException(status_code=409, detail="membership_already_exists")
+        return MembershipRepository(session).create(
+            Membership(organization_id=organization_id, **payload.model_dump(), status="active")
+        )
 
     @app.get(
         "/v1/workspace/overview",
@@ -443,10 +631,13 @@ def create_app(
     async def upload_document(
         project_id: str,
         file: UploadFile = File(...),
+        x_actor_id: str | None = Header(default=None),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Document:
         require_project(session, project_id, organization_id)
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator"})
         filename = Path(file.filename or "upload.txt").name
         extension = Path(filename).suffix.lower()
         content_type = (file.content_type or "application/octet-stream").lower()
@@ -465,6 +656,7 @@ def create_app(
         document_id = str(uuid4())
         object_key = f"{organization_id}/{project_id}/{document_id}.source"
         object_store.save_bytes(object_key, content)
+        previous = DocumentRepository(session).latest_for_project(project_id, organization_id)
         document = Document(
             id=document_id,
             organization_id=organization_id,
@@ -475,8 +667,26 @@ def create_app(
             sha256=sha256(content).hexdigest(),
             object_key=object_key,
             extracted_text=content.decode("utf-8"),
+            version_number=(previous.version_number + 1) if previous else 1,
+            parent_document_id=previous.id if previous else None,
         )
-        return DocumentRepository(session).create(document)
+        created = DocumentRepository(session).create(document)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="document.uploaded",
+                resource_type="project",
+                resource_id=project_id,
+                metadata_json=json.dumps(
+                    {"document_id": created.id, "version_number": created.version_number}
+                ),
+            )
+        )
+        session.commit()
+        session.refresh(created)
+        return created
 
     @app.get(
         "/v1/projects/{project_id}/documents", response_model=list[DocumentRead], tags=["documents"]
@@ -489,6 +699,118 @@ def create_app(
         require_project(session, project_id, organization_id)
         return DocumentRepository(session).list(project_id, organization_id)
 
+    @app.get(
+        "/v1/projects/{project_id}/documents/{from_document_id}/diff/{to_document_id}",
+        response_model=DocumentDiffRead,
+        tags=["documents"],
+    )
+    def diff_documents(
+        project_id: str,
+        from_document_id: str,
+        to_document_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        require_project(session, project_id, organization_id)
+        documents = DocumentRepository(session)
+        before = documents.get(from_document_id, organization_id)
+        after = documents.get(to_document_id, organization_id)
+        if (
+            before is None
+            or after is None
+            or before.project_id != project_id
+            or after.project_id != project_id
+        ):
+            raise HTTPException(status_code=404, detail="document_not_found")
+        matcher = difflib.SequenceMatcher(
+            a=before.extracted_text.splitlines(), b=after.extracted_text.splitlines()
+        )
+        added_lines = removed_lines = changed_lines = 0
+        for tag, start_before, end_before, start_after, end_after in matcher.get_opcodes():
+            if tag == "insert":
+                added_lines += end_after - start_after
+            elif tag == "delete":
+                removed_lines += end_before - start_before
+            elif tag == "replace":
+                changed_lines += max(end_before - start_before, end_after - start_after)
+        before_assets = {
+            asset.canonical_name
+            for asset in AssetRepository(session).list_for_project(project_id, organization_id)
+            if asset.document_id == before.id
+        }
+        after_assets = {
+            asset.canonical_name
+            for asset in AssetRepository(session).list_for_project(project_id, organization_id)
+            if asset.document_id == after.id
+        }
+        return {
+            "project_id": project_id,
+            "from_document_id": before.id,
+            "to_document_id": after.id,
+            "added_lines": added_lines,
+            "removed_lines": removed_lines,
+            "changed_lines": changed_lines,
+            "added_assets": sorted(after_assets - before_assets),
+            "removed_assets": sorted(before_assets - after_assets),
+        }
+
+    @app.post(
+        "/v1/projects/{project_id}/attachments",
+        response_model=ProjectAttachmentRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["delivery"],
+    )
+    async def upload_project_attachment(
+        project_id: str,
+        file: UploadFile = File(...),
+        asset_id: str | None = None,
+        attachment_type: str = "supporting_document",
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ProjectAttachment:
+        require_project(session, project_id, organization_id)
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator", "legal_reviewer"})
+        if asset_id is not None:
+            asset = AssetRepository(session).get(asset_id, organization_id)
+            if asset is None or asset.project_id != project_id:
+                raise HTTPException(status_code=404, detail="asset_not_found")
+        filename = Path(file.filename or "attachment.bin").name
+        content = await file.read(settings.max_upload_bytes + 1)
+        if len(content) > settings.max_upload_bytes:
+            raise HTTPException(status_code=413, detail="attachment_too_large")
+        attachment_id = str(uuid4())
+        object_key = f"{organization_id}/{project_id}/attachments/{attachment_id}-{filename}"
+        object_store.save_bytes(object_key, content)
+        attachment = ProjectAttachment(
+            id=attachment_id,
+            organization_id=organization_id,
+            project_id=project_id,
+            asset_id=asset_id,
+            original_filename=filename,
+            mime_type=(file.content_type or "application/octet-stream"),
+            size_bytes=len(content),
+            sha256=sha256(content).hexdigest(),
+            object_key=object_key,
+            attachment_type=attachment_type,
+            created_by=actor_id,
+        )
+        return ProjectAttachmentRepository(session).create(attachment)
+
+    @app.get(
+        "/v1/projects/{project_id}/attachments",
+        response_model=list[ProjectAttachmentRead],
+        tags=["delivery"],
+    )
+    def list_project_attachments(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[ProjectAttachment]:
+        require_project(session, project_id, organization_id)
+        return ProjectAttachmentRepository(session).list_for_project(project_id, organization_id)
+
     @app.get("/v1/projects/{project_id}/assets", response_model=list[AssetRead], tags=["assets"])
     def list_assets(
         project_id: str,
@@ -497,6 +819,471 @@ def create_app(
     ):
         require_project(session, project_id, organization_id)
         return AssetRepository(session).list_for_project(project_id, organization_id)
+
+    @app.patch(
+        "/v1/assets/{asset_id}",
+        response_model=AssetRead,
+        tags=["assets"],
+    )
+    def update_asset(
+        asset_id: str,
+        payload: AssetUpdate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Asset:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
+        values = payload.model_dump(exclude_unset=True)
+        asset = AssetRepository(session).update(asset_id, organization_id, **values)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="asset.updated",
+                resource_type="asset",
+                resource_id=asset_id,
+                metadata_json=json.dumps(values, default=str),
+            )
+        )
+        session.commit()
+        session.refresh(asset)
+        if asset.owner_id and asset.owner_id != actor_id:
+            session.add(
+                Notification(
+                    organization_id=organization_id,
+                    actor_id=asset.owner_id,
+                    notification_type="asset.assigned",
+                    title="Asset assigned to you",
+                    body=f"{asset.canonical_name} has a new review assignment.",
+                    resource_type="asset",
+                    resource_id=asset.id,
+                )
+            )
+            session.commit()
+        return asset
+
+    @app.get(
+        "/v1/assets/{asset_id}/playbook",
+        response_model=PlaybookRead,
+        tags=["research"],
+    )
+    def get_asset_playbook(
+        asset_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        return {"category": asset.category, **playbook_for(asset.category)}
+
+    @app.get(
+        "/v1/assets/{asset_id}/research-recheck",
+        response_model=ResearchRecheckRead,
+        tags=["research"],
+    )
+    def get_asset_recheck(
+        asset_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ResearchRecheck:
+        if AssetRepository(session).get(asset_id, organization_id) is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        recheck = ResearchRecheckRepository(session).get_for_asset(asset_id, organization_id)
+        if recheck is None:
+            raise HTTPException(status_code=404, detail="research_recheck_not_found")
+        return recheck
+
+    @app.post(
+        "/v1/assets/{asset_id}/research-recheck",
+        response_model=ResearchRecheckRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["research"],
+    )
+    def schedule_asset_recheck(
+        asset_id: str,
+        payload: ResearchRecheckCreate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ResearchRecheck:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
+        if AssetRepository(session).get(asset_id, organization_id) is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        now = datetime.now(UTC)
+        repository = ResearchRecheckRepository(session)
+        existing = repository.get_for_asset(asset_id, organization_id)
+        if existing is not None:
+            return repository.update(
+                existing.id,
+                organization_id,
+                cadence_days=payload.cadence_days,
+                next_run_at=now + timedelta(days=payload.cadence_days),
+                active=True,
+            )
+        return repository.create(
+            ResearchRecheck(
+                organization_id=organization_id,
+                asset_id=asset_id,
+                cadence_days=payload.cadence_days,
+                next_run_at=now + timedelta(days=payload.cadence_days),
+                active=True,
+                created_by=actor_id,
+            )
+        )
+
+    @app.post(
+        "/v1/assets/{asset_id}/research-recheck/run",
+        response_model=ResearchSessionRead,
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["research"],
+    )
+    def run_asset_recheck(
+        asset_id: str,
+        background_tasks: BackgroundTasks,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        recheck = ResearchRecheckRepository(session).get_for_asset(asset_id, organization_id)
+        if recheck is None:
+            raise HTTPException(status_code=404, detail="research_recheck_not_found")
+        research_session, tasks = create_research_session_records(
+            session, asset, organization_id, None
+        )
+        now = datetime.now(UTC)
+        ResearchRecheckRepository(session).update(
+            recheck.id,
+            organization_id,
+            last_run_at=now,
+            last_session_id=research_session.id,
+            next_run_at=now + timedelta(days=recheck.cadence_days),
+        )
+        for task in tasks:
+            background_tasks.add_task(process_research_task, db, task.id, organization_id, settings)
+        return research_session_payload(research_session, tasks)
+
+    @app.get(
+        "/v1/projects/{project_id}/research-rechecks",
+        response_model=list[ResearchRecheckRead],
+        tags=["research"],
+    )
+    def list_project_rechecks(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[ResearchRecheck]:
+        require_project(session, project_id, organization_id)
+        return ResearchRecheckRepository(session).list_for_project(project_id, organization_id)
+
+    @app.post(
+        "/v1/research-rechecks/run-due",
+        response_model=dict[str, object],
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["research"],
+    )
+    def run_due_rechecks(
+        background_tasks: BackgroundTasks,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator"})
+        now = datetime.now(UTC)
+        due = list(
+            session.scalars(
+                select(ResearchRecheck)
+                .where(
+                    ResearchRecheck.organization_id == organization_id,
+                    ResearchRecheck.active.is_(True),
+                    ResearchRecheck.next_run_at <= now,
+                )
+                .order_by(ResearchRecheck.next_run_at.asc())
+                .limit(25)
+            )
+        )
+        scheduled: list[str] = []
+        deferred: list[str] = []
+        for recheck in due:
+            asset = AssetRepository(session).get(recheck.asset_id, organization_id)
+            if asset is None:
+                recheck.active = False
+                continue
+            active_session = next(
+                (
+                    item
+                    for item in ResearchSessionRepository(session).list_for_asset(
+                        asset.id, organization_id
+                    )
+                    if item.status in {"planned", "running"}
+                ),
+                None,
+            )
+            if active_session is not None:
+                recheck.next_run_at = now + timedelta(minutes=15)
+                deferred.append(recheck.id)
+                continue
+            research_session, tasks = create_research_session_records(
+                session, asset, organization_id, None
+            )
+            recheck.last_run_at = now
+            recheck.last_session_id = research_session.id
+            recheck.next_run_at = now + timedelta(days=recheck.cadence_days)
+            scheduled.append(recheck.id)
+            for task in tasks:
+                background_tasks.add_task(
+                    process_research_task, db, task.id, organization_id, settings
+                )
+        if due:
+            session.commit()
+        return {
+            "scheduled_count": len(scheduled),
+            "recheck_ids": scheduled,
+            "deferred_count": len(deferred),
+            "deferred_recheck_ids": deferred,
+        }
+
+    @app.get(
+        "/v1/projects/{project_id}/delivery-readiness",
+        response_model=DeliveryReadinessRead,
+        tags=["delivery"],
+    )
+    def project_delivery_readiness(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        require_project(session, project_id, organization_id)
+        assets = AssetRepository(session).list_for_project(project_id, organization_id)
+        cards = ClearanceCardRepository(session).list_for_project(project_id, organization_id)
+        latest_cards: dict[str, ClearanceCard] = {}
+        for card in cards:
+            latest_cards.setdefault(card.asset_id, card)
+        clear_assets = sum(
+            card.status == "approved" and not card.needs_human_review
+            for card in latest_cards.values()
+        )
+        blocked_assets = sum(asset.risk_status == "blocked" for asset in assets)
+        unresolved_assets = max(len(assets) - clear_assets, 0)
+        now = datetime.now(UTC)
+        stale_rechecks = sum(
+            recheck.active and recheck.next_run_at <= now
+            for recheck in ResearchRecheckRepository(session).list_for_project(
+                project_id, organization_id
+            )
+        )
+        open_requests = int(
+            session.scalar(
+                select(func.count(OutreachDraft.id))
+                .join(Asset, Asset.id == OutreachDraft.asset_id)
+                .where(
+                    Asset.project_id == project_id,
+                    Asset.organization_id == organization_id,
+                    OutreachDraft.organization_id == organization_id,
+                    OutreachDraft.status.not_in(("closed", "cancelled")),
+                )
+            )
+            or 0
+        )
+        required_actions: list[str] = []
+        if unresolved_assets:
+            required_actions.append(f"Resolve {unresolved_assets} asset review item(s)")
+        if blocked_assets:
+            required_actions.append(f"Address {blocked_assets} blocked asset(s)")
+        if stale_rechecks:
+            required_actions.append(f"Recheck {stale_rechecks} stale evidence schedule(s)")
+        if open_requests:
+            required_actions.append(f"Close or update {open_requests} permission request(s)")
+        if not assets:
+            required_actions.append("Upload and analyze source material")
+        readiness = "ready" if assets and not required_actions else "conditional" if assets else "not_ready"
+        return {
+            "project_id": project_id,
+            "status": readiness,
+            "total_assets": len(assets),
+            "clear_assets": clear_assets,
+            "unresolved_assets": unresolved_assets,
+            "blocked_assets": blocked_assets,
+            "stale_rechecks": stale_rechecks,
+            "open_requests": open_requests,
+            "required_actions": required_actions,
+        }
+
+    @app.get(
+        "/v1/projects/{project_id}/activity",
+        response_model=list[AuditEventRead],
+        tags=["audit"],
+    )
+    def list_project_activity(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[AuditEvent]:
+        require_project(session, project_id, organization_id)
+        return AuditRepository(session).list_for_project(project_id, organization_id)
+
+    @app.get(
+        "/v1/activity",
+        response_model=list[AuditEventRead],
+        tags=["audit"],
+    )
+    def list_workspace_activity(
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[AuditEvent]:
+        return AuditRepository(session).list_for_organization(organization_id)
+
+    @app.get(
+        "/v1/notifications",
+        response_model=list[NotificationRead],
+        tags=["collaboration"],
+    )
+    def list_notifications(
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[Notification]:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer", "post_supervisor", "viewer"},
+        )
+        return NotificationRepository(session).list_for_actor(organization_id, actor_id)
+
+    @app.post(
+        "/v1/notifications/{notification_id}/read",
+        response_model=NotificationRead,
+        tags=["collaboration"],
+    )
+    def mark_notification_read(
+        notification_id: str,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Notification:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer", "post_supervisor", "viewer"},
+        )
+        notification = NotificationRepository(session).mark_read(
+            notification_id, organization_id, actor_id
+        )
+        if notification is None:
+            raise HTTPException(status_code=404, detail="notification_not_found")
+        return notification
+
+    @app.get(
+        "/v1/assets/{asset_id}/comments",
+        response_model=list[AssetCommentRead],
+        tags=["collaboration"],
+    )
+    def list_asset_comments(
+        asset_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[AssetComment]:
+        if AssetRepository(session).get(asset_id, organization_id) is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        return AssetCommentRepository(session).list_for_asset(asset_id, organization_id)
+
+    @app.post(
+        "/v1/assets/{asset_id}/comments",
+        response_model=AssetCommentRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["collaboration"],
+    )
+    def create_asset_comment(
+        asset_id: str,
+        payload: AssetCommentCreate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> AssetComment:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer", "post_supervisor", "viewer"},
+        )
+        if AssetRepository(session).get(asset_id, organization_id) is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        mention_ids = list(dict.fromkeys(payload.mention_ids))
+        member_ids = {
+            member.actor_id
+            for member in MembershipRepository(session).list_for_organization(organization_id)
+            if member.status == "active"
+        }
+        if organization_id == settings.default_organization_id:
+            member_ids.update({"demo-user", "demo-producer", "demo-reviewer"})
+        invalid_mentions = sorted(set(mention_ids) - member_ids)
+        if invalid_mentions:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "unknown_mention", "actor_ids": invalid_mentions},
+            )
+        comment = AssetComment(
+            organization_id=organization_id,
+            asset_id=asset_id,
+            author_id=actor_id,
+            body=payload.body,
+            mention_ids=mention_ids,
+        )
+        for mentioned_actor_id in mention_ids:
+            session.add(
+                Notification(
+                    organization_id=organization_id,
+                    actor_id=mentioned_actor_id,
+                    notification_type="asset.mentioned",
+                    title="You were mentioned in an asset comment",
+                    body=payload.body,
+                    resource_type="asset",
+                    resource_id=asset_id,
+                )
+            )
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="asset.comment_created",
+                resource_type="asset",
+                resource_id=asset_id,
+                metadata_json=json.dumps({"mention_ids": mention_ids}),
+            )
+        )
+        return AssetCommentRepository(session).create(comment)
 
     @app.get(
         "/v1/projects/{project_id}/clearance-cards",
@@ -534,10 +1321,17 @@ def create_app(
         project_id: str,
         payload: AnalysisRunCreate,
         background_tasks: BackgroundTasks,
+        x_actor_id: str | None = Header(default=None),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Job:
         require_project(session, project_id, organization_id)
+        require_role(
+            session,
+            organization_id,
+            x_actor_id or "demo-user",
+            {"admin", "producer", "coordinator"},
+        )
         if payload.document_id is not None:
             document = DocumentRepository(session).get(payload.document_id, organization_id)
             if document is None or document.project_id != project_id:
@@ -582,9 +1376,16 @@ def create_app(
         asset_id: str,
         payload: ResearchSessionCreate,
         background_tasks: BackgroundTasks,
+        x_actor_id: str | None = Header(default=None),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
+        require_role(
+            session,
+            organization_id,
+            x_actor_id or "demo-user",
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
         asset = AssetRepository(session).get(asset_id, organization_id)
         if asset is None:
             raise HTTPException(status_code=404, detail="asset_not_found")
@@ -667,9 +1468,16 @@ def create_app(
     def retry_research_session(
         session_id: str,
         background_tasks: BackgroundTasks,
+        x_actor_id: str | None = Header(default=None),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
+        require_role(
+            session,
+            organization_id,
+            x_actor_id or "demo-user",
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
         previous = ResearchSessionRepository(session).get(session_id, organization_id)
         if previous is None:
             raise HTTPException(status_code=404, detail="research_session_not_found")
@@ -695,9 +1503,16 @@ def create_app(
         task_id: str,
         payload: ResearchFollowUpCreate,
         background_tasks: BackgroundTasks,
+        x_actor_id: str | None = Header(default=None),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
+        require_role(
+            session,
+            organization_id,
+            x_actor_id or "demo-user",
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
         task = ResearchTaskRepository(session).get(task_id, organization_id)
         if task is None:
             raise HTTPException(status_code=404, detail="research_task_not_found")
@@ -738,9 +1553,16 @@ def create_app(
         asset_id: str,
         payload: ResearchRunCreate,
         background_tasks: BackgroundTasks,
+        x_actor_id: str | None = Header(default=None),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> ResearchRun:
+        require_role(
+            session,
+            organization_id,
+            x_actor_id or "demo-user",
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
         asset = AssetRepository(session).get(asset_id, organization_id)
         if asset is None:
             raise HTTPException(status_code=404, detail="asset_not_found")
@@ -828,6 +1650,13 @@ def create_app(
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Approval:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
         asset = AssetRepository(session).get(asset_id, organization_id)
         if asset is None:
             raise HTTPException(status_code=404, detail="asset_not_found")
@@ -844,6 +1673,13 @@ def create_app(
             "escalate_to_legal": ("escalated", "blocked", True),
         }
         card_status, risk_status, needs_human_review = card_status_by_decision[payload.decision]
+        next_action_by_decision = {
+            "approve_next_action": "Proceed with permission work or delivery review",
+            "request_more_research": "Run a focused evidence follow-up",
+            "mark_not_applicable": "Record the editorial rationale",
+            "reject": "Replace or remove the asset",
+            "escalate_to_legal": "Confirm rights position with legal",
+        }
         latest_approval = ApprovalRepository(session).get_latest_for_card(card.id, organization_id)
         approval = Approval(
             organization_id=organization_id,
@@ -851,12 +1687,13 @@ def create_app(
             clearance_card_id=card.id,
             decision=payload.decision,
             note=payload.note,
-            actor_id=x_actor_id or "demo-user",
+            actor_id=actor_id,
             supersedes_id=latest_approval.id if latest_approval else None,
         )
         card.status = card_status
         card.needs_human_review = needs_human_review
         asset.risk_status = risk_status
+        asset.next_action = next_action_by_decision[payload.decision]
         session.add(approval)
         session.add(
             AuditEvent(
@@ -871,6 +1708,18 @@ def create_app(
                 ),
             )
         )
+        if asset.owner_id and asset.owner_id != actor_id:
+            session.add(
+                Notification(
+                    organization_id=organization_id,
+                    actor_id=asset.owner_id,
+                    notification_type="approval.recorded",
+                    title="Asset decision recorded",
+                    body=f"{actor_id} recorded {payload.decision.replace('_', ' ')} for {asset.canonical_name}.",
+                    resource_type="asset",
+                    resource_id=asset_id,
+                )
+            )
         session.commit()
         session.refresh(approval)
         return approval
@@ -888,6 +1737,13 @@ def create_app(
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> OutreachDraft:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
         asset = AssetRepository(session).get(asset_id, organization_id)
         if asset is None:
             raise HTTPException(status_code=404, detail="asset_not_found")
@@ -896,7 +1752,6 @@ def create_app(
             raise HTTPException(status_code=404, detail="clearance_card_not_found")
         project = require_project(session, asset.project_id, organization_id)
         subject, body = build_outreach_draft(project, asset, card, payload.recipient_hint)
-        actor_id = x_actor_id or "demo-user"
         draft = OutreachDraft(
             organization_id=organization_id,
             asset_id=asset_id,
@@ -939,6 +1794,50 @@ def create_app(
             raise HTTPException(status_code=404, detail="asset_not_found")
         return OutreachDraftRepository(session).list_for_asset(asset_id, organization_id)
 
+    @app.patch(
+        "/v1/outreach-drafts/{draft_id}",
+        response_model=OutreachDraftRead,
+        tags=["outreach"],
+    )
+    def update_outreach_draft(
+        draft_id: str,
+        payload: OutreachDraftUpdate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> OutreachDraft:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
+        values = payload.model_dump(exclude_unset=True)
+        if values.get("status") == "approved":
+            values["approved_by"] = actor_id
+        if values.get("status") == "sent":
+            values["sent_at"] = datetime.now(UTC)
+        if values.get("status") == "response_received":
+            values["responded_at"] = datetime.now(UTC)
+        draft = OutreachDraftRepository(session).update(draft_id, organization_id, **values)
+        if draft is None:
+            raise HTTPException(status_code=404, detail="outreach_draft_not_found")
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="outreach_draft.updated",
+                resource_type="asset",
+                resource_id=draft.asset_id,
+                metadata_json=json.dumps(values, default=str),
+            )
+        )
+        session.commit()
+        session.refresh(draft)
+        return draft
+
     @app.post(
         "/v1/projects/{project_id}/reports",
         response_model=ClearanceReportRead,
@@ -951,6 +1850,13 @@ def create_app(
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> ClearanceReport:
+        actor_id = x_actor_id or "demo-user"
+        require_role(
+            session,
+            organization_id,
+            actor_id,
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
         project = require_project(session, project_id, organization_id)
         assets = AssetRepository(session).list_for_project(project_id, organization_id)
         cards = ClearanceCardRepository(session).list_for_project(project_id, organization_id)
@@ -958,20 +1864,44 @@ def create_app(
         runs = ResearchRunRepository(session)
         for card in cards:
             sources.extend(runs.list_sources(card.research_run_id))
+        approvals = ApprovalRepository(session).list_for_project(project_id, organization_id)
+        drafts: list[OutreachDraft] = []
+        outreach = OutreachDraftRepository(session)
+        for asset in assets:
+            drafts.extend(outreach.list_for_asset(asset.id, organization_id))
+        previous_report = ClearanceReportRepository(session).list_for_project(
+            project_id, organization_id
+        )
+        report_version = (previous_report[0].version_number + 1) if previous_report else 1
+        policy_version = "risk-policy-v1"
+        content_markdown = build_clearance_report(
+            project,
+            assets,
+            cards,
+            sources,
+            approvals,
+            report_version=report_version,
+            policy_version=policy_version,
+            drafts=drafts,
+        )
         report = ClearanceReport(
             organization_id=organization_id,
             project_id=project_id,
             report_type="clearance_summary",
             status="ready",
             generated_by="clearcut_report_builder",
-            content_markdown=build_clearance_report(project, assets, cards, sources),
+            content_markdown=content_markdown,
+            version_number=report_version,
+            content_hash=sha256(content_markdown.encode("utf-8")).hexdigest(),
+            policy_version=policy_version,
+            source_snapshot_at=datetime.now(UTC),
         )
         session.add(report)
         session.add(
             AuditEvent(
                 organization_id=organization_id,
                 actor_type="user",
-                actor_id=x_actor_id or "demo-user",
+                actor_id=actor_id,
                 action="report.created",
                 resource_type="project",
                 resource_id=project_id,
@@ -1021,6 +1951,7 @@ def create_app(
     def download_report_pdf(
         project_id: str,
         report_id: str,
+        x_actor_id: str | None = Header(default=None),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Response:
@@ -1028,12 +1959,324 @@ def create_app(
         report = ClearanceReportRepository(session).get(report_id, project_id, organization_id)
         if report is None:
             raise HTTPException(status_code=404, detail="report_not_found")
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=x_actor_id or "demo-user",
+                action="report.downloaded",
+                resource_type="project",
+                resource_id=project_id,
+                metadata_json=json.dumps({"report_id": report_id, "format": "pdf"}),
+            )
+        )
+        session.commit()
         filename = f"clearcut-{project_id}-report.pdf"
         return Response(
             content=build_pdf(report.content_markdown),
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+    @app.post(
+        "/v1/projects/{project_id}/review-shares",
+        response_model=ReviewShareRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["collaboration"],
+    )
+    def create_review_share(
+        project_id: str,
+        payload: ReviewShareCreate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator", "legal_reviewer"})
+        require_project(session, project_id, organization_id)
+        token = f"ccreview_{secrets.token_urlsafe(32)}"
+        share = ReviewShare(
+            organization_id=organization_id,
+            project_id=project_id,
+            token_hash=sha256(token.encode("utf-8")).hexdigest(),
+            label=payload.label,
+            expires_at=payload.expires_at,
+            created_by=actor_id,
+        )
+        created = ReviewShareRepository(session).create(share)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="review_share.created",
+                resource_type="project",
+                resource_id=project_id,
+                metadata_json=json.dumps({"share_id": created.id, "label": created.label}),
+            )
+        )
+        session.commit()
+        return {"id": created.id, "project_id": project_id, "label": created.label, "expires_at": created.expires_at, "revoked_at": created.revoked_at, "created_by": created.created_by, "created_at": created.created_at, "share_token": token}
+
+    @app.get(
+        "/v1/projects/{project_id}/review-shares",
+        response_model=list[ReviewShareRead],
+        tags=["collaboration"],
+    )
+    def list_review_shares(
+        project_id: str,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[ReviewShare]:
+        require_project(session, project_id, organization_id)
+        require_role(
+            session,
+            organization_id,
+            x_actor_id or "demo-user",
+            {"admin", "producer", "coordinator", "legal_reviewer"},
+        )
+        return ReviewShareRepository(session).list_for_project(project_id, organization_id)
+
+    @app.post(
+        "/v1/projects/{project_id}/review-shares/{share_id}/revoke",
+        response_model=ReviewShareRead,
+        tags=["collaboration"],
+    )
+    def revoke_review_share(
+        project_id: str,
+        share_id: str,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ReviewShare:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator"})
+        require_project(session, project_id, organization_id)
+        share = session.scalar(
+            select(ReviewShare).where(
+                ReviewShare.id == share_id,
+                ReviewShare.project_id == project_id,
+                ReviewShare.organization_id == organization_id,
+            )
+        )
+        if share is None:
+            raise HTTPException(status_code=404, detail="review_share_not_found")
+        revoked = ReviewShareRepository(session).revoke(share_id, organization_id)
+        if revoked is None:
+            raise HTTPException(status_code=404, detail="review_share_not_found")
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="review_share.revoked",
+                resource_type="project",
+                resource_id=project_id,
+                metadata_json=json.dumps({"share_id": share_id}),
+            )
+        )
+        session.commit()
+        return revoked
+
+    @app.get("/v1/review-shares/{share_token}", tags=["collaboration"])
+    def get_public_review_share(
+        share_token: str,
+        session: Session = Depends(get_db),
+    ) -> dict[str, object]:
+        share = ReviewShareRepository(session).get_by_hash(
+            sha256(share_token.encode("utf-8")).hexdigest()
+        )
+        if (
+            share is None
+            or share.revoked_at is not None
+            or (share.expires_at is not None and share.expires_at <= datetime.now(UTC))
+        ):
+            raise HTTPException(status_code=404, detail="review_share_not_found")
+        project = ProjectRepository(session).get(share.project_id, share.organization_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="project_not_found")
+        assets = AssetRepository(session).list_for_project(share.project_id, share.organization_id)
+        cards = ClearanceCardRepository(session).list_for_project(share.project_id, share.organization_id)
+        return {
+            "project": {"id": project.id, "title": project.title, "project_type": project.project_type, "status": project.status},
+            "readiness": project_delivery_readiness(share.project_id, session, share.organization_id),
+            "assets": [
+                {"id": asset.id, "canonical_name": asset.canonical_name, "category": asset.category, "risk_status": asset.risk_status}
+                for asset in assets
+            ],
+            "clearance_cards": [
+                {"id": card.id, "asset_id": card.asset_id, "status": card.status, "risk_score": card.risk_score, "summary": card.summary, "recommendation": card.recommendation, "evidence_count": card.evidence_count}
+                for card in cards
+            ],
+        }
+
+    @app.post(
+        "/v1/organizations/current/api-keys",
+        response_model=ApiKeyRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["integrations"],
+    )
+    def create_api_key(
+        payload: ApiKeyCreate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin"})
+        secret = f"cc_live_{secrets.token_urlsafe(32)}"
+        key = ApiKey(
+            organization_id=organization_id,
+            name=payload.name,
+            key_prefix=secret[:16],
+            key_hash=sha256(secret.encode("utf-8")).hexdigest(),
+            created_by=actor_id,
+        )
+        created = ApiKeyRepository(session).create(key)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="api_key.created",
+                resource_type="organization",
+                resource_id=organization_id,
+                metadata_json=json.dumps({"key_id": created.id, "name": created.name}),
+            )
+        )
+        session.commit()
+        return {"id": created.id, "organization_id": created.organization_id, "name": created.name, "key_prefix": created.key_prefix, "created_by": created.created_by, "last_used_at": created.last_used_at, "revoked_at": created.revoked_at, "created_at": created.created_at, "secret": secret}
+
+    @app.get(
+        "/v1/organizations/current/api-keys",
+        response_model=list[ApiKeyRead],
+        tags=["integrations"],
+    )
+    def list_api_keys(
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[ApiKey]:
+        require_role(session, organization_id, x_actor_id or "demo-user", {"admin"})
+        return ApiKeyRepository(session).list_for_organization(organization_id)
+
+    @app.post(
+        "/v1/organizations/current/api-keys/{key_id}/revoke",
+        response_model=ApiKeyRead,
+        tags=["integrations"],
+    )
+    def revoke_api_key(
+        key_id: str,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ApiKey:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin"})
+        key = ApiKeyRepository(session).revoke(key_id, organization_id)
+        if key is None:
+            raise HTTPException(status_code=404, detail="api_key_not_found")
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="api_key.revoked",
+                resource_type="organization",
+                resource_id=organization_id,
+                metadata_json=json.dumps({"key_id": key_id}),
+            )
+        )
+        session.commit()
+        return key
+
+    @app.post(
+        "/v1/organizations/current/webhooks",
+        response_model=WebhookEndpointRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["integrations"],
+    )
+    def create_webhook(
+        payload: WebhookEndpointCreate,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> WebhookEndpoint:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin"})
+        created = WebhookEndpointRepository(session).create(
+            WebhookEndpoint(
+                organization_id=organization_id,
+                url=payload.url,
+                event_types=payload.event_types,
+                secret_hash=sha256(secrets.token_urlsafe(32).encode("utf-8")).hexdigest(),
+                active=True,
+                created_by=actor_id,
+            )
+        )
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="webhook.created",
+                resource_type="organization",
+                resource_id=organization_id,
+                metadata_json=json.dumps({"webhook_id": created.id, "url": created.url}),
+            )
+        )
+        session.commit()
+        return created
+
+    @app.get(
+        "/v1/organizations/current/webhooks",
+        response_model=list[WebhookEndpointRead],
+        tags=["integrations"],
+    )
+    def list_webhooks(
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[WebhookEndpoint]:
+        require_role(session, organization_id, x_actor_id or "demo-user", {"admin"})
+        return WebhookEndpointRepository(session).list_for_organization(organization_id)
+
+    @app.post(
+        "/v1/organizations/current/webhooks/{webhook_id}/toggle",
+        response_model=WebhookEndpointRead,
+        tags=["integrations"],
+    )
+    def toggle_webhook(
+        webhook_id: str,
+        x_actor_id: str | None = Header(default=None),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> WebhookEndpoint:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin"})
+        endpoint = WebhookEndpointRepository(session).list_for_organization(organization_id)
+        current = next((item for item in endpoint if item.id == webhook_id), None)
+        if current is None:
+            raise HTTPException(status_code=404, detail="webhook_not_found")
+        updated = WebhookEndpointRepository(session).update(
+            webhook_id, organization_id, active=not current.active
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="webhook_not_found")
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="webhook.toggled",
+                resource_type="organization",
+                resource_id=organization_id,
+                metadata_json=json.dumps({"webhook_id": webhook_id, "active": updated.active}),
+            )
+        )
+        session.commit()
+        return updated
 
     @app.get("/", include_in_schema=False)
     def root(request: Request) -> dict[str, str]:

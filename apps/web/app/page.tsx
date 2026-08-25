@@ -22,6 +22,8 @@ export default async function HomePage() {
           <Link className="nav-item active" href="/"><span className="nav-icon">⌂</span>Projects</Link>
           <Link className="nav-item" href={(reviewProject ? `/projects/${reviewProject.id}` : "/") as Route}><span className="nav-icon">◈</span>Review queue</Link>
           <Link className="nav-item" href={"/reports" as Route}><span className="nav-icon">↗</span>Reports</Link>
+          <Link className="nav-item" href={"/activity" as Route}><span className="nav-icon">◌</span>Activity</Link>
+          <Link className="nav-item" href={"/settings" as Route}><span className="nav-icon">⚙</span>Settings</Link>
         </nav>
         <div className="sidebar-bottom">
           <div className="account"><div className="avatar">SM</div><div><div className="account-name">Studio Meridian</div><div className="account-role">Producer workspace</div></div></div>

@@ -24,6 +24,7 @@ from clearcut_api.models import (
 )
 from clearcut_api.outreach import build_outreach_draft
 from clearcut_api.pdf import build_pdf
+from clearcut_api.playbooks import playbook_for
 from clearcut_api.providers.parallel_api import ParallelApiProvider
 from clearcut_api.reporting import build_clearance_report
 from clearcut_api.repositories import (
@@ -65,6 +66,14 @@ The crew meets outside the **Old Railway Station** beside a **The Blue Hour** ph
     assert by_name["Midnight City"].scene_reference == "04"
     assert by_name["Harbor Light Café"].category == "brand"
     assert by_name["Old Railway Station"].category == "location"
+
+
+def test_category_playbook_exposes_rights_specific_questions() -> None:
+    playbook = playbook_for("music")
+
+    assert "composition" in " ".join(playbook["rights_questions"]).lower()
+    assert playbook["required_evidence"]
+    assert playbook["escalation_signals"]
 
 
 def test_document_analysis_persists_assets_and_updates_job(tmp_path) -> None:
@@ -241,6 +250,8 @@ def test_outreach_draft_and_report_keep_human_boundary() -> None:
     assert "Internal research note" not in body
     assert "not legal advice" in report
     assert "https://example.com/rights" in report
+    assert "Report version: 1" in report
+    assert "Policy version: risk-policy-v1" in report
 
 
 def test_clearance_report_pdf_is_branded_and_structured() -> None:
@@ -272,6 +283,18 @@ def test_clearance_report_pdf_is_branded_and_structured() -> None:
 
 Evidence:
 - [Rights source](https://example.com/rights) — Licensing guidance.
+
+## Decision log
+
+| Asset | Decision | Actor | Recorded | Note |
+|---|---|---|---|---|
+| Midnight City | escalate_to_legal | demo-reviewer | 2026-08-24T10:02:00+00:00 | Confirm sync and master rights. |
+
+## Permission work
+
+| Asset | Status | Recipient | Due | Subject |
+|---|---|---|---|---|
+| Midnight City | approved | rights@example.com | 2026-09-01T00:00:00+00:00 | Music rights information request |
 """
 
     pdf = build_pdf(markdown)
@@ -280,6 +303,10 @@ Evidence:
     assert b"/Type /Pages" in pdf
     assert b"CLEARCUT" in pdf
     assert b"Midnight City" in pdf
+    assert b"Human accountability" in pdf
+    assert b"demo-reviewer" in pdf
+    assert b"PERMISSION WORK" in pdf
+    assert b"rights@example.com" in pdf
 
 
 def test_research_run_creates_evidence_backed_clearance_card() -> None:

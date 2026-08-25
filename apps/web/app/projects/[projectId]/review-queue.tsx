@@ -51,6 +51,9 @@ type OutreachDraft = {
   subject: string;
   body: string;
   status: string;
+  recipient_email: string | null;
+  response_note: string | null;
+  due_at: string | null;
 };
 
 const decisions = [
@@ -94,6 +97,24 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
           const response = await fetch(`${apiUrl}/v1/research-runs/${card.research_run_id}/sources`, { headers });
           return [card.research_run_id, response.ok ? await response.json() : []] as const;
         }),
+      );
+      const draftEntries = await Promise.all(
+        nextAssets.map(async (asset) => {
+          const response = await fetch(apiUrl + "/v1/assets/" + asset.id + "/outreach-drafts", { headers, cache: "no-store" });
+          const drafts = response.ok ? await response.json() as OutreachDraft[] : [];
+          return [asset.id, drafts[0]] as const;
+        }),
+      );
+      setDraftsByCard(
+        Object.fromEntries(
+          draftEntries
+            .filter((entry): entry is [string, OutreachDraft] => Boolean(entry[1]))
+            .map(([assetId, draft]) => {
+              const card = nextCards.find((item) => item.asset_id === assetId);
+              return card ? [card.id, draft] : null;
+            })
+            .filter((entry): entry is [string, OutreachDraft] => Boolean(entry)),
+        ),
       );
       setAssets(nextAssets);
       setCards(nextCards);
@@ -164,6 +185,24 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
       setDraftsByCard((current) => ({ ...current, [card.id]: draft }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to draft the permission request.");
+    } finally {
+      setDraftingCard(null);
+    }
+  }
+
+  async function updateDraft(cardId: string, draft: OutreachDraft, nextStatus: "approved" | "sent" | "response_received" | "closed") {
+    setDraftingCard(cardId);
+    try {
+      const response = await fetch(apiUrl + "/v1/outreach-drafts/" + draft.id, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-organization-id": "demo-org", "x-actor-id": "demo-producer" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (!response.ok) throw new Error("Unable to update the permission request.");
+      const updated = await response.json() as OutreachDraft;
+      setDraftsByCard((current) => ({ ...current, [cardId]: updated }));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update the permission request.");
     } finally {
       setDraftingCard(null);
     }
@@ -327,6 +366,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
                   <summary>Permission request draft · {draftsByCard[card.id].status}</summary>
                   <strong>{draftsByCard[card.id].subject}</strong>
                   <pre>{draftsByCard[card.id].body}</pre>
+                  <div className="draft-lifecycle"><span>Lifecycle</span><button className="table-action" disabled={draftingCard === card.id || draftsByCard[card.id].status !== "draft"} onClick={() => void updateDraft(card.id, draftsByCard[card.id], "approved")} type="button">Approve to send</button><button className="table-action" disabled={draftingCard === card.id || draftsByCard[card.id].status !== "approved"} onClick={() => void updateDraft(card.id, draftsByCard[card.id], "sent")} type="button">Mark sent</button><button className="table-action" disabled={draftingCard === card.id || draftsByCard[card.id].status !== "sent"} onClick={() => void updateDraft(card.id, draftsByCard[card.id], "response_received")} type="button">Record response</button><button className="table-action" disabled={draftingCard === card.id || !["response_received", "approved", "sent"].includes(draftsByCard[card.id].status)} onClick={() => void updateDraft(card.id, draftsByCard[card.id], "closed")} type="button">Close request</button></div>
                 </details>
               ) : null}
             </article>

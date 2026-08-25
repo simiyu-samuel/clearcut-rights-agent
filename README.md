@@ -10,7 +10,7 @@ ClearCut turns a screenplay, shot list, or rough cut into a structured rights-cl
 
 This repository has a working fixture-mode vertical slice for the Agentic Cinema hackathon. Google Cloud and Parallel credentials are now secured for staging; the next infrastructure gate is deploying the persistent Cloud SQL/Cloud Storage-backed services.
 
-The implementation foundation is now in progress. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions and [docs/06-roadmap.md](docs/06-roadmap.md) for the delivery sequence.
+The production-shaped workspace batch is implemented locally and is awaiting one consolidated staging release. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions, [docs/12-batch-release-plan.md](docs/12-batch-release-plan.md) for the release gate, and [docs/13-operations-runbook.md](docs/13-operations-runbook.md) for operating procedures.
 
 ## Primary partner track
 
@@ -46,6 +46,8 @@ Clearance report + outreach actions
 - [Partner-track decision](docs/decisions/0001-partner-track.md)
 - [Tooling, accounts, and credential readiness report](docs/10-tooling-and-credentials-report.md)
 - [Deployment infrastructure](infra/README.md)
+- [Batch release plan](docs/12-batch-release-plan.md)
+- [Operations runbook](docs/13-operations-runbook.md)
 
 ## License
 

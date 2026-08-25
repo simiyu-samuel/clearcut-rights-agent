@@ -26,6 +26,24 @@ class EvidenceItem:
 
 
 @dataclass
+class Decision:
+    asset: str
+    decision: str
+    actor: str
+    recorded: str
+    note: str
+
+
+@dataclass
+class PermissionWork:
+    asset: str
+    status: str
+    recipient: str
+    due: str
+    subject: str
+
+
+@dataclass
 class Detail:
     name: str
     category: str = ""
@@ -47,6 +65,8 @@ class ParsedReport:
     notice: str
     summary_rows: list[SummaryRow]
     details: list[Detail]
+    decisions: list[Decision]
+    permissions: list[PermissionWork]
 
 
 def _clean(value: str) -> str:
@@ -67,9 +87,13 @@ def _parse_report(markdown: str) -> ParsedReport:
         ),
         summary_rows=[],
         details=[],
+        decisions=[],
+        permissions=[],
     )
     in_summary_table = False
     in_details = False
+    in_decision_log = False
+    in_permission_work = False
     current: Detail | None = None
 
     lines = markdown.splitlines()
@@ -87,9 +111,35 @@ def _parse_report(markdown: str) -> ParsedReport:
             parsed.notice = _clean(line[2:])
         elif line == "## Asset summary":
             in_summary_table = True
+            in_details = False
+            in_decision_log = False
+            in_permission_work = False
         elif line == "## Detailed review":
             in_summary_table = False
             in_details = True
+            in_decision_log = False
+            in_permission_work = False
+        elif line == "## Decision log":
+            if current is not None:
+                parsed.details.append(current)
+                current = None
+            in_summary_table = False
+            in_details = False
+            in_decision_log = True
+            in_permission_work = False
+        elif line == "## Permission work":
+            if current is not None:
+                parsed.details.append(current)
+                current = None
+            in_summary_table = False
+            in_details = False
+            in_decision_log = False
+            in_permission_work = True
+        elif line == "## Method and limitations":
+            in_summary_table = False
+            in_details = False
+            in_decision_log = False
+            in_permission_work = False
         elif in_summary_table and line.startswith("|"):
             if "| Asset |" in line:
                 continue
@@ -107,6 +157,34 @@ def _parse_report(markdown: str) -> ParsedReport:
                         risk=cells[3] or "-",
                         confidence=cells[4] or "-",
                         evidence=evidence,
+                    )
+                )
+        elif in_decision_log and line.startswith("|"):
+            if "| Asset | Decision |" in line:
+                continue
+            cells = _table_cells(line)
+            if len(cells) >= 5 and cells[0] and not cells[0].startswith("---"):
+                parsed.decisions.append(
+                    Decision(
+                        asset=cells[0],
+                        decision=cells[1],
+                        actor=cells[2],
+                        recorded=cells[3],
+                        note=cells[4],
+                    )
+                )
+        elif in_permission_work and line.startswith("|"):
+            if "| Asset | Status |" in line:
+                continue
+            cells = _table_cells(line)
+            if len(cells) >= 5 and cells[0] and not cells[0].startswith("---"):
+                parsed.permissions.append(
+                    PermissionWork(
+                        asset=cells[0],
+                        status=cells[1],
+                        recipient=cells[2],
+                        due=cells[3],
+                        subject=cells[4],
                     )
                 )
         elif in_details and line.startswith("### "):
@@ -330,6 +408,74 @@ class _PdfBuilder:
             self.commands.extend([f"{_color(216, 208, 195)} RG", f"{MARGIN} {self.y} {PAGE_WIDTH - 2 * MARGIN} 1 re S"])
             self.y -= 15
 
+    def decisions(self) -> None:
+        self.ensure(55)
+        if not self.report.decisions:
+            self.wrapped(
+                "No human decisions have been recorded in this snapshot.",
+                size=10,
+                leading=14,
+                width=88,
+                color=_color(75, 71, 67),
+            )
+            return
+        columns = [(MARGIN, 155), (215, 100), (322, 78), (410, 92), (510, 54)]
+        headers = ["ASSET", "DECISION", "ACTOR", "RECORDED", "NOTE"]
+        row_height = 24
+        self.rect(MARGIN, self.y - row_height + 4, PAGE_WIDTH - 2 * MARGIN, row_height, _color(41, 40, 43))
+        for (x, _), header in zip(columns, headers, strict=True):
+            self.text(header, x + 7, self.y - 10, 7, bold=True, color=_color(246, 241, 232))
+        self.y -= row_height
+        for index, decision in enumerate(self.report.decisions):
+            if self.y - row_height < 58:
+                self.new_page()
+                self.section("05", "Decision log", "Human accountability")
+                self.rect(MARGIN, self.y - row_height + 4, PAGE_WIDTH - 2 * MARGIN, row_height, _color(41, 40, 43))
+                for (x, _), header in zip(columns, headers, strict=True):
+                    self.text(header, x + 7, self.y - 10, 7, bold=True, color=_color(246, 241, 232))
+                self.y -= row_height
+            if index % 2 == 0:
+                self.rect(MARGIN, self.y - row_height + 4, PAGE_WIDTH - 2 * MARGIN, row_height, _color(239, 234, 225))
+            values = [decision.asset, decision.decision, decision.actor, decision.recorded, decision.note]
+            for (x, width), value in zip(columns, values, strict=True):
+                self.text(_ascii(value)[: max(10, width // 5)], x + 7, self.y - 10, 7, color=_color(75, 71, 67), bold=x == MARGIN)
+            self.y -= row_height
+        self.y -= 12
+
+    def permissions(self) -> None:
+        self.ensure(55)
+        if not self.report.permissions:
+            self.wrapped(
+                "No permission requests have been drafted in this snapshot.",
+                size=10,
+                leading=14,
+                width=88,
+                color=_color(75, 71, 67),
+            )
+            return
+        columns = [(MARGIN, 150), (210, 82), (302, 112), (420, 82), (510, 54)]
+        headers = ["ASSET", "STATUS", "RECIPIENT", "DUE", "SUBJECT"]
+        row_height = 24
+        self.rect(MARGIN, self.y - row_height + 4, PAGE_WIDTH - 2 * MARGIN, row_height, _color(41, 40, 43))
+        for (x, _), header in zip(columns, headers, strict=True):
+            self.text(header, x + 7, self.y - 10, 7, bold=True, color=_color(246, 241, 232))
+        self.y -= row_height
+        for index, permission in enumerate(self.report.permissions):
+            if self.y - row_height < 58:
+                self.new_page()
+                self.section("04", "Permission work", "Requests and response state")
+                self.rect(MARGIN, self.y - row_height + 4, PAGE_WIDTH - 2 * MARGIN, row_height, _color(41, 40, 43))
+                for (x, _), header in zip(columns, headers, strict=True):
+                    self.text(header, x + 7, self.y - 10, 7, bold=True, color=_color(246, 241, 232))
+                self.y -= row_height
+            if index % 2 == 0:
+                self.rect(MARGIN, self.y - row_height + 4, PAGE_WIDTH - 2 * MARGIN, row_height, _color(239, 234, 225))
+            values = [permission.asset, permission.status, permission.recipient, permission.due, permission.subject]
+            for (x, width), value in zip(columns, values, strict=True):
+                self.text(_ascii(value)[: max(10, width // 5)], x + 7, self.y - 10, 7, color=_color(75, 71, 67), bold=x == MARGIN)
+            self.y -= row_height
+        self.y -= 12
+
     def build(self) -> bytes:
         self.cover()
         self.new_page()
@@ -351,7 +497,11 @@ class _PdfBuilder:
         self.summary_table()
         self.section("03", "Detailed review", "Evidence and recommended action")
         self.details()
-        self.section("04", "Method and limitations", "What this snapshot means")
+        self.section("04", "Permission work", "Requests and response state")
+        self.permissions()
+        self.section("05", "Decision log", "Human accountability")
+        self.decisions()
+        self.section("06", "Method and limitations", "What this snapshot means")
         self.wrapped(self.report.notice, size=10, leading=14, width=88, color=_color(75, 71, 67))
         self.wrapped("Evidence is retained as a research snapshot. Recheck unresolved or time-sensitive sources before distribution and record the final human decision in ClearCut.", size=10, leading=14, width=88, color=_color(75, 71, 67))
         for page in self.pages:

@@ -21,6 +21,10 @@ export type ClearanceReport = {
   status: "ready" | "failed";
   generated_by: string;
   content_markdown: string;
+  version_number: number;
+  content_hash: string | null;
+  policy_version: string | null;
+  source_snapshot_at: string | null;
   created_at: string;
 };
 

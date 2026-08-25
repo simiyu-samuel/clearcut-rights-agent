@@ -2,20 +2,70 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import (
+    ApiKey,
     Approval,
     Asset,
+    AssetComment,
     AuditEvent,
     ClearanceCard,
     ClearanceReport,
     Document,
     Job,
+    Membership,
+    Notification,
+    Organization,
     OutreachDraft,
     Project,
+    ProjectAttachment,
+    ResearchRecheck,
     ResearchRun,
     ResearchSession,
     ResearchTask,
+    ReviewShare,
     SourceRecord,
+    WebhookEndpoint,
 )
+
+
+class OrganizationRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get(self, organization_id: str) -> Organization | None:
+        return self.session.get(Organization, organization_id)
+
+    def create(self, organization: Organization) -> Organization:
+        self.session.add(organization)
+        self.session.commit()
+        self.session.refresh(organization)
+        return organization
+
+
+class MembershipRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get(self, organization_id: str, actor_id: str) -> Membership | None:
+        statement = select(Membership).where(
+            Membership.organization_id == organization_id,
+            Membership.actor_id == actor_id,
+            Membership.status == "active",
+        )
+        return self.session.scalar(statement)
+
+    def list_for_organization(self, organization_id: str) -> list[Membership]:
+        statement = (
+            select(Membership)
+            .where(Membership.organization_id == organization_id)
+            .order_by(Membership.display_name.asc())
+        )
+        return list(self.session.scalars(statement))
+
+    def create(self, membership: Membership) -> Membership:
+        self.session.add(membership)
+        self.session.commit()
+        self.session.refresh(membership)
+        return membership
 
 
 class ProjectRepository:
@@ -135,6 +185,14 @@ class DocumentRepository:
         )
         return self.session.scalar(statement)
 
+    def latest_for_project(self, project_id: str, organization_id: str) -> Document | None:
+        statement = (
+            select(Document)
+            .where(Document.project_id == project_id, Document.organization_id == organization_id)
+            .order_by(Document.version_number.desc(), Document.created_at.desc())
+        )
+        return self.session.scalars(statement).first()
+
     def update_status(self, document_id: str, status: str) -> Document | None:
         document = self.session.get(Document, document_id)
         if document is None:
@@ -169,6 +227,16 @@ class AssetRepository:
             Asset.id == asset_id, Asset.organization_id == organization_id
         )
         return self.session.scalar(statement)
+
+    def update(self, asset_id: str, organization_id: str, **values: object) -> Asset | None:
+        asset = self.get(asset_id, organization_id)
+        if asset is None:
+            return None
+        for key, value in values.items():
+            setattr(asset, key, value)
+        self.session.commit()
+        self.session.refresh(asset)
+        return asset
 
 
 class ResearchRunRepository:
@@ -419,6 +487,148 @@ class AuditRepository:
         self.session.refresh(event)
         return event
 
+    def list_for_organization(self, organization_id: str, limit: int = 100) -> list[AuditEvent]:
+        statement = (
+            select(AuditEvent)
+            .where(AuditEvent.organization_id == organization_id)
+            .order_by(AuditEvent.created_at.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
+
+    def list_for_project(
+        self, project_id: str, organization_id: str, limit: int = 100
+    ) -> list[AuditEvent]:
+        resource_ids = set(
+            self.session.scalars(
+                select(Asset.id).where(
+                    Asset.project_id == project_id, Asset.organization_id == organization_id
+                )
+            )
+        )
+        resource_ids.add(project_id)
+        if not resource_ids:
+            return []
+        statement = (
+            select(AuditEvent)
+            .where(
+                AuditEvent.organization_id == organization_id,
+                AuditEvent.resource_id.in_(resource_ids),
+            )
+            .order_by(AuditEvent.created_at.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
+
+
+class ResearchRecheckRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get_for_asset(self, asset_id: str, organization_id: str) -> ResearchRecheck | None:
+        statement = (
+            select(ResearchRecheck)
+            .where(
+                ResearchRecheck.asset_id == asset_id,
+                ResearchRecheck.organization_id == organization_id,
+            )
+            .order_by(ResearchRecheck.created_at.desc())
+        )
+        return self.session.scalars(statement).first()
+
+    def list_for_project(self, project_id: str, organization_id: str) -> list[ResearchRecheck]:
+        statement = (
+            select(ResearchRecheck)
+            .join(Asset, Asset.id == ResearchRecheck.asset_id)
+            .where(
+                Asset.project_id == project_id,
+                Asset.organization_id == organization_id,
+                ResearchRecheck.organization_id == organization_id,
+            )
+            .order_by(ResearchRecheck.next_run_at.asc())
+        )
+        return list(self.session.scalars(statement))
+
+    def create(self, recheck: ResearchRecheck) -> ResearchRecheck:
+        self.session.add(recheck)
+        self.session.commit()
+        self.session.refresh(recheck)
+        return recheck
+
+    def update(self, recheck_id: str, organization_id: str, **values: object) -> ResearchRecheck | None:
+        recheck = self.session.scalar(
+            select(ResearchRecheck).where(
+                ResearchRecheck.id == recheck_id,
+                ResearchRecheck.organization_id == organization_id,
+            )
+        )
+        if recheck is None:
+            return None
+        for key, value in values.items():
+            setattr(recheck, key, value)
+        self.session.commit()
+        self.session.refresh(recheck)
+        return recheck
+
+
+class AssetCommentRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def list_for_asset(self, asset_id: str, organization_id: str) -> list[AssetComment]:
+        statement = (
+            select(AssetComment)
+            .where(
+                AssetComment.asset_id == asset_id,
+                AssetComment.organization_id == organization_id,
+            )
+            .order_by(AssetComment.created_at.asc())
+        )
+        return list(self.session.scalars(statement))
+
+    def create(self, comment: AssetComment) -> AssetComment:
+        self.session.add(comment)
+        self.session.commit()
+        self.session.refresh(comment)
+        return comment
+
+
+class NotificationRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def list_for_actor(self, organization_id: str, actor_id: str) -> list[Notification]:
+        statement = (
+            select(Notification)
+            .where(Notification.organization_id == organization_id, Notification.actor_id == actor_id)
+            .order_by(Notification.created_at.desc())
+            .limit(100)
+        )
+        return list(self.session.scalars(statement))
+
+    def create(self, notification: Notification) -> Notification:
+        self.session.add(notification)
+        self.session.commit()
+        self.session.refresh(notification)
+        return notification
+
+    def mark_read(self, notification_id: str, organization_id: str, actor_id: str) -> Notification | None:
+        notification = self.session.scalar(
+            select(Notification).where(
+                Notification.id == notification_id,
+                Notification.organization_id == organization_id,
+                Notification.actor_id == actor_id,
+            )
+        )
+        if notification is None:
+            return None
+        from .models import utc_now
+
+        notification.read_at = utc_now()
+        self.session.commit()
+        self.session.refresh(notification)
+        return notification
+
 
 class OutreachDraftRepository:
     def __init__(self, session: Session):
@@ -426,6 +636,24 @@ class OutreachDraftRepository:
 
     def create(self, draft: OutreachDraft) -> OutreachDraft:
         self.session.add(draft)
+        self.session.commit()
+        self.session.refresh(draft)
+        return draft
+
+    def get(self, draft_id: str, organization_id: str) -> OutreachDraft | None:
+        return self.session.scalar(
+            select(OutreachDraft).where(
+                OutreachDraft.id == draft_id,
+                OutreachDraft.organization_id == organization_id,
+            )
+        )
+
+    def update(self, draft_id: str, organization_id: str, **values: object) -> OutreachDraft | None:
+        draft = self.get(draft_id, organization_id)
+        if draft is None:
+            return None
+        for key, value in values.items():
+            setattr(draft, key, value)
         self.session.commit()
         self.session.refresh(draft)
         return draft
@@ -470,3 +698,132 @@ class ClearanceReportRepository:
             .order_by(ClearanceReport.created_at.desc())
         )
         return list(self.session.scalars(statement))
+
+
+class ProjectAttachmentRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def list_for_project(self, project_id: str, organization_id: str) -> list[ProjectAttachment]:
+        statement = (
+            select(ProjectAttachment)
+            .where(
+                ProjectAttachment.project_id == project_id,
+                ProjectAttachment.organization_id == organization_id,
+            )
+            .order_by(ProjectAttachment.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def create(self, attachment: ProjectAttachment) -> ProjectAttachment:
+        self.session.add(attachment)
+        self.session.commit()
+        self.session.refresh(attachment)
+        return attachment
+
+
+class ReviewShareRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def list_for_project(self, project_id: str, organization_id: str) -> list[ReviewShare]:
+        statement = (
+            select(ReviewShare)
+            .where(
+                ReviewShare.project_id == project_id,
+                ReviewShare.organization_id == organization_id,
+            )
+            .order_by(ReviewShare.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def get_by_hash(self, token_hash: str) -> ReviewShare | None:
+        return self.session.scalar(select(ReviewShare).where(ReviewShare.token_hash == token_hash))
+
+    def create(self, share: ReviewShare) -> ReviewShare:
+        self.session.add(share)
+        self.session.commit()
+        self.session.refresh(share)
+        return share
+
+    def revoke(self, share_id: str, organization_id: str) -> ReviewShare | None:
+        share = self.session.scalar(
+            select(ReviewShare).where(
+                ReviewShare.id == share_id,
+                ReviewShare.organization_id == organization_id,
+            )
+        )
+        if share is None:
+            return None
+        from .models import utc_now
+
+        share.revoked_at = utc_now()
+        self.session.commit()
+        self.session.refresh(share)
+        return share
+
+
+class ApiKeyRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def list_for_organization(self, organization_id: str) -> list[ApiKey]:
+        statement = (
+            select(ApiKey)
+            .where(ApiKey.organization_id == organization_id)
+            .order_by(ApiKey.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def create(self, key: ApiKey) -> ApiKey:
+        self.session.add(key)
+        self.session.commit()
+        self.session.refresh(key)
+        return key
+
+    def revoke(self, key_id: str, organization_id: str) -> ApiKey | None:
+        key = self.session.scalar(
+            select(ApiKey).where(ApiKey.id == key_id, ApiKey.organization_id == organization_id)
+        )
+        if key is None:
+            return None
+        from .models import utc_now
+
+        key.revoked_at = utc_now()
+        self.session.commit()
+        self.session.refresh(key)
+        return key
+
+
+class WebhookEndpointRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def list_for_organization(self, organization_id: str) -> list[WebhookEndpoint]:
+        statement = (
+            select(WebhookEndpoint)
+            .where(WebhookEndpoint.organization_id == organization_id)
+            .order_by(WebhookEndpoint.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def create(self, endpoint: WebhookEndpoint) -> WebhookEndpoint:
+        self.session.add(endpoint)
+        self.session.commit()
+        self.session.refresh(endpoint)
+        return endpoint
+
+    def update(self, endpoint_id: str, organization_id: str, **values: object) -> WebhookEndpoint | None:
+        endpoint = self.session.scalar(
+            select(WebhookEndpoint).where(
+                WebhookEndpoint.id == endpoint_id,
+                WebhookEndpoint.organization_id == organization_id,
+            )
+        )
+        if endpoint is None:
+            return None
+        for key, value in values.items():
+            setattr(endpoint, key, value)
+        self.session.commit()
+        self.session.refresh(endpoint)
+        return endpoint

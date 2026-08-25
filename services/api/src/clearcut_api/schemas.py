@@ -25,8 +25,13 @@ ApprovalDecision = Literal[
     "reject",
     "escalate_to_legal",
 ]
-OutreachDraftStatus = Literal["draft", "approved", "sent", "cancelled"]
+OutreachDraftStatus = Literal[
+    "draft", "approved", "sent", "response_received", "closed", "cancelled"
+]
 ReportStatus = Literal["ready", "failed"]
+MembershipRole = Literal["admin", "producer", "coordinator", "legal_reviewer", "post_supervisor", "viewer"]
+MembershipStatus = Literal["active", "invited", "suspended"]
+RecheckStatus = Literal["active", "paused"]
 
 
 class ProjectCreate(BaseModel):
@@ -63,6 +68,35 @@ class WorkspaceOverviewRead(BaseModel):
     parallel_sources: int
 
 
+class MembershipRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    actor_id: str
+    display_name: str
+    role: MembershipRole
+    status: MembershipStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class MembershipCreate(BaseModel):
+    actor_id: str = Field(min_length=2, max_length=120)
+    display_name: str = Field(min_length=2, max_length=160)
+    role: MembershipRole = "viewer"
+
+
+class OrganizationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    slug: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class AnalysisRunCreate(BaseModel):
     document_id: str | None = Field(default=None, max_length=120)
 
@@ -90,6 +124,8 @@ class DocumentRead(BaseModel):
     mime_type: str
     size_bytes: int
     sha256: str
+    version_number: int
+    parent_document_id: str | None
     status: DocumentStatus
     created_at: datetime
     updated_at: datetime
@@ -111,8 +147,19 @@ class AssetRead(BaseModel):
     extraction_confidence: float
     risk_status: RiskStatus
     reason_codes: list[str]
+    priority: Literal["low", "medium", "high", "critical"]
+    owner_id: str | None
+    due_at: datetime | None
+    next_action: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class AssetUpdate(BaseModel):
+    priority: Literal["low", "medium", "high", "critical"] | None = None
+    owner_id: str | None = Field(default=None, max_length=120)
+    due_at: datetime | None = None
+    next_action: str | None = Field(default=None, max_length=160)
 
 
 class ResearchRunCreate(BaseModel):
@@ -208,6 +255,34 @@ class ResearchSessionRead(BaseModel):
     tasks: list[ResearchTaskRead] = Field(default_factory=list)
 
 
+class ResearchRecheckCreate(BaseModel):
+    cadence_days: int = Field(default=30, ge=1, le=365)
+
+
+class ResearchRecheckRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    asset_id: str
+    cadence_days: int
+    next_run_at: datetime
+    last_run_at: datetime | None
+    last_session_id: str | None
+    active: bool
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlaybookRead(BaseModel):
+    category: str
+    rights_questions: list[str]
+    required_evidence: list[str]
+    recommended_actions: list[str]
+    escalation_signals: list[str]
+
+
 class ClearanceCardRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -262,8 +337,13 @@ class OutreachDraftRead(BaseModel):
     asset_id: str
     clearance_card_id: str
     recipient_hint: str
+    recipient_email: str | None
     subject: str
     body: str
+    terms: dict[str, str]
+    response_note: str | None
+    responded_at: datetime | None
+    due_at: datetime | None
     status: OutreachDraftStatus
     generated_by: str
     created_by: str
@@ -271,6 +351,151 @@ class OutreachDraftRead(BaseModel):
     sent_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class OutreachDraftUpdate(BaseModel):
+    status: Literal["draft", "approved", "sent", "response_received", "closed", "cancelled"] | None = None
+    recipient_email: str | None = Field(default=None, max_length=320)
+    response_note: str | None = Field(default=None, max_length=4000)
+    due_at: datetime | None = None
+    terms: dict[str, str] | None = None
+
+
+class AssetCommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+    mention_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class AssetCommentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    asset_id: str
+    author_id: str
+    body: str
+    mention_ids: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class NotificationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    actor_id: str
+    notification_type: str
+    title: str
+    body: str
+    resource_type: str
+    resource_id: str
+    read_at: datetime | None
+    created_at: datetime
+
+
+class AuditEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    actor_type: str
+    actor_id: str
+    action: str
+    resource_type: str
+    resource_id: str
+    metadata_json: str | None
+    created_at: datetime
+
+
+class DeliveryReadinessRead(BaseModel):
+    project_id: str
+    status: Literal["not_ready", "conditional", "ready"]
+    total_assets: int
+    clear_assets: int
+    unresolved_assets: int
+    blocked_assets: int
+    stale_rechecks: int
+    open_requests: int
+    required_actions: list[str]
+
+
+class DocumentDiffRead(BaseModel):
+    project_id: str
+    from_document_id: str
+    to_document_id: str
+    added_lines: int
+    removed_lines: int
+    changed_lines: int
+    added_assets: list[str]
+    removed_assets: list[str]
+
+
+class ProjectAttachmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    project_id: str
+    asset_id: str | None
+    original_filename: str
+    mime_type: str
+    size_bytes: int
+    sha256: str
+    attachment_type: str
+    created_by: str
+    created_at: datetime
+
+
+class ReviewShareCreate(BaseModel):
+    label: str = Field(default="External review", min_length=2, max_length=160)
+    expires_at: datetime | None = None
+
+
+class ReviewShareRead(BaseModel):
+    id: str
+    project_id: str
+    label: str
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    created_by: str
+    created_at: datetime
+    share_token: str | None = None
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+
+
+class ApiKeyRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    name: str
+    key_prefix: str
+    created_by: str
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    created_at: datetime
+    secret: str | None = None
+
+
+class WebhookEndpointCreate(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+    event_types: list[str] = Field(default_factory=list, max_length=20)
+
+
+class WebhookEndpointRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    organization_id: str
+    url: str
+    event_types: list[str]
+    active: bool
+    created_by: str
+    created_at: datetime
 
 
 class ClearanceReportRead(BaseModel):
@@ -283,4 +508,8 @@ class ClearanceReportRead(BaseModel):
     status: ReportStatus
     generated_by: str
     content_markdown: str
+    version_number: int
+    content_hash: str | None
+    policy_version: str | None
+    source_snapshot_at: datetime | None
     created_at: datetime

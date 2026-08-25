@@ -27,6 +27,16 @@ def test_system_routes_are_registered() -> None:
     assert {
         "/v1/projects/{project_id}/approvals",
         "/v1/assets/{asset_id}/approvals",
+        "/v1/projects/{project_id}/delivery-readiness",
+        "/v1/projects/{project_id}/activity",
+        "/v1/assets/{asset_id}/research-recheck",
+        "/v1/assets/{asset_id}/comments",
+        "/v1/projects/{project_id}/review-shares",
+        "/v1/organizations/current/api-keys",
+        "/v1/organizations/current/api-keys/{key_id}/revoke",
+        "/v1/organizations/current/webhooks",
+        "/v1/organizations/current/webhooks/{webhook_id}/toggle",
+        "/v1/research-rechecks/run-due",
     }.issubset(routes)
     assert app.title == "ClearCut API"
 

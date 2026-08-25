@@ -16,7 +16,7 @@ export default async function ReportPage({ params }: { params: Promise<{ project
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">C</div><div><div className="brand-name">ClearCut</div><div className="brand-caption">Rights intelligence</div></div></div>
         <div className="nav-label">Workspace</div>
-        <nav className="nav"><Link className="nav-item" href="/"><span className="nav-icon">⌂</span>Projects</Link><Link className="nav-item" href={`/projects/${project.id}` as Route}><span className="nav-icon">◈</span>Review queue</Link><Link className="nav-item active" href="/reports"><span className="nav-icon">↗</span>Reports</Link></nav>
+        <nav className="nav"><Link className="nav-item" href="/"><span className="nav-icon">⌂</span>Projects</Link><Link className="nav-item" href={`/projects/${project.id}` as Route}><span className="nav-icon">◈</span>Review queue</Link><Link className="nav-item active" href="/reports"><span className="nav-icon">↗</span>Reports</Link><Link className="nav-item" href={"/activity" as Route}><span className="nav-icon">◌</span>Activity</Link><Link className="nav-item" href={"/settings" as Route}><span className="nav-icon">⚙</span>Settings</Link></nav>
         <div className="sidebar-bottom"><div className="account"><div className="avatar">SM</div><div><div className="account-name">Studio Meridian</div><div className="account-role">Producer workspace</div></div></div></div>
       </aside>
       <main className="main">
