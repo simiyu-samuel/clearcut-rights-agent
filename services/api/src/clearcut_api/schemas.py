@@ -180,6 +180,7 @@ class ResearchTaskRead(BaseModel):
     objective: str
     query: str
     status: ResearchTaskStatus
+    provider_request_id: str | None
     source_count: int = Field(ge=0)
     quality_tier: str
     gap_codes: list[str]

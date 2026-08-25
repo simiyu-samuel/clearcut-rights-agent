@@ -132,8 +132,10 @@ def create_app(
         research_session: ResearchSession,
         tasks: list[ResearchTask],
         sources_by_task: dict[str, list[SourceRecord]] | None = None,
+        provider_request_ids: dict[str, str | None] | None = None,
     ) -> dict[str, object]:
         sources_by_task = sources_by_task or {}
+        provider_request_ids = provider_request_ids or {}
         return {
             "id": research_session.id,
             "organization_id": research_session.organization_id,
@@ -157,6 +159,7 @@ def create_app(
                     "objective": task.objective,
                     "query": task.query,
                     "status": task.status,
+                    "provider_request_id": provider_request_ids.get(task.id),
                     "source_count": task.source_count,
                     "quality_tier": task.quality_tier,
                     "gap_codes": task.gap_codes or [],
@@ -221,6 +224,16 @@ def create_app(
     ) -> dict[str, list[SourceRecord]]:
         repository = ResearchRunRepository(session)
         return {task.id: repository.list_sources_for_task(task.id) for task in tasks}
+
+    def provider_request_ids(
+        session: Session, tasks: list[ResearchTask]
+    ) -> dict[str, str | None]:
+        repository = ResearchRunRepository(session)
+        request_ids: dict[str, str | None] = {}
+        for task in tasks:
+            run = repository.get(task.research_run_id, task.organization_id)
+            request_ids[task.id] = run.provider_request_id if run else None
+        return request_ids
 
     def create_follow_up_records(
         session: Session,
@@ -603,7 +616,10 @@ def create_app(
             session_tasks = tasks.list_for_session(research_session.id, organization_id)
             payloads.append(
                 research_session_payload(
-                    research_session, session_tasks, sources_by_task(session, session_tasks)
+                    research_session,
+                    session_tasks,
+                    sources_by_task(session, session_tasks),
+                    provider_request_ids(session, session_tasks),
                 )
             )
         return payloads
@@ -622,7 +638,12 @@ def create_app(
         if research_session is None:
             raise HTTPException(status_code=404, detail="research_session_not_found")
         tasks = ResearchTaskRepository(session).list_for_session(session_id, organization_id)
-        return research_session_payload(research_session, tasks, sources_by_task(session, tasks))
+        return research_session_payload(
+            research_session,
+            tasks,
+            sources_by_task(session, tasks),
+            provider_request_ids(session, tasks),
+        )
 
     @app.post(
         "/v1/research-sessions/{session_id}/retry",

@@ -17,6 +17,7 @@ type ResearchTask = {
   angle: string;
   title: string;
   status: string;
+  provider_request_id: string | null;
   source_count: number;
   quality_tier: string;
   gap_codes: string[];
@@ -40,11 +41,14 @@ type Source = {
   title: string;
   excerpt: string;
   source_quality: string;
+  provider_session_id: string | null;
+  retrieved_at: string;
 };
 
 type ResearchSession = {
   id: string;
   asset_id: string;
+  provider: string;
   status: string;
   total_tasks: number;
   completed_tasks: number;
@@ -61,6 +65,11 @@ function statusLabel(status: string): string {
 
 function qualityLabel(quality: string): string {
   return { strong: "Strong evidence", moderate: "Search lead", demo: "Demo evidence", none: "No evidence" }[quality] ?? "Unrated";
+}
+
+function retrievedLabel(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown time" : new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 export function ResearchPanel({ projectId }: ResearchPanelProps) {
@@ -199,6 +208,8 @@ export function ResearchPanel({ projectId }: ResearchPanelProps) {
             const session = latestByAsset.get(asset.id);
             const busy = busyAsset === asset.id;
             const progress = session ? Math.round((session.completed_tasks / Math.max(session.total_tasks, 1)) * 100) : 0;
+            const providerSessions = session ? [...new Set(session.tasks.flatMap((task) => task.sources.map((source) => source.provider_session_id).filter(Boolean)))] : [];
+            const requestIds = session ? [...new Set(session.tasks.map((task) => task.provider_request_id).filter(Boolean))] : [];
             return (
               <article className="research-session" key={asset.id}>
                 <div className="research-session-summary">
@@ -214,6 +225,7 @@ export function ResearchPanel({ projectId }: ResearchPanelProps) {
                   <div className="research-session-body">
                     <div className="research-progress-row"><span>Research progress</span><strong>{session.completed_tasks}/{session.total_tasks} angles · {progress}%</strong></div>
                     <div className="research-progress-track"><span style={{ width: `${progress}%` }} /></div>
+                    <details className="research-provenance"><summary>View research objective &amp; provenance</summary><div className="research-provenance-grid"><div><span>Objective</span><p>{session.objective}</p></div><div><span>Provider</span><p>{session.provider} · {requestIds.length} request trace{requestIds.length === 1 ? "" : "s"}</p></div><div><span>Parallel session</span><p>{providerSessions.length > 0 ? providerSessions.join(", ") : "Pending source retrieval"}</p></div></div></details>
                     {session.findings.length > 0 ? <div className="research-findings"><div className="research-findings-label">Review signals</div>{session.findings.map((finding) => <div className={`research-finding ${finding.severity}`} key={finding.code}><div><strong>{finding.title}</strong><p>{finding.detail}</p></div><span>{finding.kind}</span></div>)}</div> : null}
                     <div className="research-task-grid">
                       {session.tasks.map((task) => (
@@ -221,7 +233,7 @@ export function ResearchPanel({ projectId }: ResearchPanelProps) {
                           <div className="research-task-head"><strong>{task.title}</strong><span className={`task-status ${task.status}`}>{statusLabel(task.status)}</span></div>
                           <div className="research-task-meta"><span>{task.source_count} source{task.source_count === 1 ? "" : "s"}</span><span className={`quality-tier ${task.quality_tier}`}>{qualityLabel(task.quality_tier)}</span></div>
                           {task.findings.length > 0 ? <div className="research-gaps">{task.findings.map((finding) => <span className={finding.severity} key={finding.code}>{finding.title}</span>)}</div> : <small className="research-clear">No gaps detected in this angle</small>}
-                          {task.sources.length > 0 ? <details className="research-task-evidence"><summary>View evidence ({task.sources.length})</summary>{task.sources.map((source) => <a href={source.url} key={source.id} rel="noreferrer" target="_blank"><strong>{source.title}</strong><small>{source.excerpt}</small></a>)}</details> : null}
+                          {task.sources.length > 0 ? <details className="research-task-evidence"><summary>View evidence ({task.sources.length})</summary>{task.sources.map((source) => <a href={source.url} key={source.id} rel="noreferrer" target="_blank"><strong>{source.title}</strong><small>{source.excerpt}</small><small>{source.source_quality} · Retrieved {retrievedLabel(source.retrieved_at)}</small>{source.provider_session_id ? <small>Provider session · {source.provider_session_id}</small> : null}</a>)}</details> : null}
                           {task.findings.length > 0 && ["completed", "partial", "failed"].includes(session.status) ? <button className="table-action research-follow-up" disabled={busy} onClick={() => void startFollowUp(session, task)} type="button">{busy ? "Starting…" : "Start focused follow-up"}</button> : null}
                           {task.error_code ? <small className="research-error">{task.error_code}</small> : null}
                         </div>
