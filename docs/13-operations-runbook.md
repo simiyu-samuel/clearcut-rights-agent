@@ -8,7 +8,7 @@ Use the deployed API URL and verify:
 
     curl -fsS "$API_URL/health"
     curl -fsS "$API_URL/readyz"
-    curl -fsS -H "X-Organization-ID: demo-org" "$API_URL/v1/workspace/overview"
+    curl -fsS -H "Authorization: Bearer $ID_TOKEN" -H "X-Organization-ID: $ORGANIZATION_ID" "$API_URL/v1/workspace/overview"
 
 "/health" confirms the process is serving. "/readyz" confirms the database connection is usable. A response header named "x-correlation-id" is returned for every request and should be included when escalating an incident.
 
@@ -20,8 +20,8 @@ Use the deployed API URL and verify:
 4. The due-recheck endpoint can be invoked by a scheduler or operator:
 
     curl -X POST "$API_URL/v1/research-rechecks/run-due" \
-      -H "X-Organization-ID: demo-org" \
-      -H "X-Actor-ID: demo-user"
+      -H "Authorization: Bearer $ID_TOKEN" \
+      -H "X-Organization-ID: $ORGANIZATION_ID"
 
 The endpoint limits one pass to 25 schedules and advances each schedule before work begins, preventing duplicate launches.
 
@@ -39,6 +39,7 @@ The endpoint limits one pass to 25 schedules and advances each schedule before w
 - Review links are hashed at rest, scoped to one project, revocable, and optionally expiring.
 - API key secret material is returned only on creation; later list responses expose a prefix and status.
 - Report versions are append-only snapshots with a content hash, policy version, and evidence timestamp.
+- Identity Platform mode is required for shared environments; demo headers are local-only compatibility behavior.
 
 ## Incident record
 

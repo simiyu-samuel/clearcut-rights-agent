@@ -1,6 +1,7 @@
 import difflib
 import json
 import logging
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -25,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .auth import AuthenticatedIdentity, authenticate_request
 from .config import settings
 from .db import Database, create_database
 from .models import (
@@ -89,6 +91,8 @@ from .schemas import (
     AssetRead,
     AssetUpdate,
     AuditEventRead,
+    AuthIdentityRead,
+    AuthMeRead,
     ClearanceCardRead,
     ClearanceReportRead,
     DeliveryReadinessRead,
@@ -98,6 +102,7 @@ from .schemas import (
     MembershipCreate,
     MembershipRead,
     NotificationRead,
+    OrganizationCreate,
     OrganizationRead,
     OutreachDraftCreate,
     OutreachDraftRead,
@@ -192,17 +197,40 @@ def create_app(
         with db.session_factory() as session:
             yield session
 
-    def get_organization_id(x_organization_id: str | None = Header(default=None)) -> str:
-        return x_organization_id or settings.default_organization_id
+    def get_auth_identity(
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_actor_id: str | None = Header(default=None),
+    ) -> AuthenticatedIdentity:
+        return authenticate_request(request, authorization, x_actor_id, settings)
 
-    def get_actor_id(x_actor_id: str | None = Header(default=None)) -> str:
-        return x_actor_id or "demo-user"
+    def get_actor_id(identity: AuthenticatedIdentity = Depends(get_auth_identity)) -> str:
+        return identity.actor_id
+
+    def get_organization_id(
+        x_organization_id: str | None = Header(default=None),
+        identity: AuthenticatedIdentity = Depends(get_auth_identity),
+        session: Session = Depends(get_db),
+    ) -> str:
+        if settings.auth_mode == "demo":
+            return x_organization_id or settings.default_organization_id
+
+        organization_id = x_organization_id
+        if not organization_id:
+            memberships = MembershipRepository(session).list_for_actor(identity.actor_id)
+            if len(memberships) == 1:
+                organization_id = memberships[0].organization_id
+        if not organization_id:
+            raise HTTPException(status_code=400, detail="organization_selection_required")
+        if MembershipRepository(session).get(organization_id, identity.actor_id) is None:
+            raise HTTPException(status_code=403, detail="organization_membership_required")
+        return organization_id
 
     def require_role(
         session: Session, organization_id: str, actor_id: str, allowed_roles: set[str]
     ) -> Membership:
         membership = MembershipRepository(session).get(organization_id, actor_id)
-        if membership is None and organization_id == settings.default_organization_id:
+        if membership is None and settings.auth_mode == "demo" and organization_id == settings.default_organization_id:
             fallback_roles = {
                 "demo-user": "admin",
                 "demo-producer": "producer",
@@ -400,6 +428,75 @@ def create_app(
             raise HTTPException(status_code=503, detail="database_not_ready") from exc
         return {"status": "ready"}
 
+    @app.get("/v1/auth/me", response_model=AuthMeRead, tags=["auth"])
+    def get_auth_me(
+        identity: AuthenticatedIdentity = Depends(get_auth_identity),
+        session: Session = Depends(get_db),
+    ) -> dict[str, object]:
+        memberships = MembershipRepository(session).list_for_actor(identity.actor_id)
+        if settings.auth_mode == "demo" and not memberships:
+            now = datetime.now(UTC)
+            memberships = [
+                Membership(
+                    id=f"demo-membership-{identity.actor_id}",
+                    organization_id=settings.default_organization_id,
+                    actor_id=identity.actor_id,
+                    display_name=identity.display_name,
+                    role="admin",
+                    status="active",
+                    created_at=now,
+                    updated_at=now,
+                )
+            ]
+        return {
+            "identity": AuthIdentityRead(
+                actor_id=identity.actor_id,
+                email=identity.email,
+                display_name=identity.display_name,
+            ),
+            "memberships": memberships,
+        }
+
+    @app.post(
+        "/v1/organizations",
+        response_model=OrganizationRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["organization"],
+    )
+    def create_organization(
+        payload: OrganizationCreate,
+        identity: AuthenticatedIdentity = Depends(get_auth_identity),
+        session: Session = Depends(get_db),
+    ) -> Organization:
+        organization_id = str(uuid4())
+        base_slug = payload.slug or re.sub(r"[^a-z0-9]+", "-", payload.name.lower()).strip("-")
+        slug = f"{base_slug or 'workspace'}-{organization_id[:8]}"
+        organization = Organization(id=organization_id, name=payload.name, slug=slug)
+        session.add(organization)
+        session.add(
+            Membership(
+                organization_id=organization_id,
+                actor_id=identity.actor_id,
+                display_name=identity.display_name,
+                role="admin",
+                status="active",
+            )
+        )
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=identity.actor_id,
+                action="organization.created",
+                resource_type="organization",
+                resource_id=organization_id,
+                metadata_json=json.dumps({"name": organization.name}),
+            )
+        )
+        session.commit()
+        session.refresh(organization)
+        return organization
+
     @app.post(
         "/v1/projects",
         response_model=ProjectRead,
@@ -408,7 +505,7 @@ def create_app(
     )
     def create_project(
         payload: ProjectCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Project:
@@ -450,6 +547,8 @@ def create_app(
         organization = OrganizationRepository(session).get(organization_id)
         if organization is not None:
             return organization
+        if settings.auth_mode != "demo":
+            raise HTTPException(status_code=404, detail="organization_not_found")
         now = datetime.now(UTC)
         return Organization(
             id=organization_id,
@@ -469,7 +568,7 @@ def create_app(
         organization_id: str = Depends(get_organization_id),
     ) -> list[Membership]:
         members = MembershipRepository(session).list_for_organization(organization_id)
-        if members:
+        if members or settings.auth_mode != "demo":
             return members
         now = datetime.now(UTC)
         return [
@@ -498,7 +597,7 @@ def create_app(
     )
     def create_member(
         payload: MembershipCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Membership:
@@ -631,7 +730,7 @@ def create_app(
     async def upload_document(
         project_id: str,
         file: UploadFile = File(...),
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Document:
@@ -765,7 +864,7 @@ def create_app(
         file: UploadFile = File(...),
         asset_id: str | None = None,
         attachment_type: str = "supporting_document",
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> ProjectAttachment:
@@ -828,7 +927,7 @@ def create_app(
     def update_asset(
         asset_id: str,
         payload: AssetUpdate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Asset:
@@ -912,7 +1011,7 @@ def create_app(
     def schedule_asset_recheck(
         asset_id: str,
         payload: ResearchRecheckCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> ResearchRecheck:
@@ -956,7 +1055,7 @@ def create_app(
     def run_asset_recheck(
         asset_id: str,
         background_tasks: BackgroundTasks,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
@@ -1009,7 +1108,7 @@ def create_app(
     )
     def run_due_rechecks(
         background_tasks: BackgroundTasks,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
@@ -1165,7 +1264,7 @@ def create_app(
         tags=["collaboration"],
     )
     def list_notifications(
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> list[Notification]:
@@ -1185,7 +1284,7 @@ def create_app(
     )
     def mark_notification_read(
         notification_id: str,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Notification:
@@ -1226,7 +1325,7 @@ def create_app(
     def create_asset_comment(
         asset_id: str,
         payload: AssetCommentCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> AssetComment:
@@ -1321,7 +1420,7 @@ def create_app(
         project_id: str,
         payload: AnalysisRunCreate,
         background_tasks: BackgroundTasks,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Job:
@@ -1376,7 +1475,7 @@ def create_app(
         asset_id: str,
         payload: ResearchSessionCreate,
         background_tasks: BackgroundTasks,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
@@ -1468,7 +1567,7 @@ def create_app(
     def retry_research_session(
         session_id: str,
         background_tasks: BackgroundTasks,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
@@ -1503,7 +1602,7 @@ def create_app(
         task_id: str,
         payload: ResearchFollowUpCreate,
         background_tasks: BackgroundTasks,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
@@ -1553,7 +1652,7 @@ def create_app(
         asset_id: str,
         payload: ResearchRunCreate,
         background_tasks: BackgroundTasks,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> ResearchRun:
@@ -1646,7 +1745,7 @@ def create_app(
     def record_approval(
         asset_id: str,
         payload: ApprovalCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Approval:
@@ -1733,7 +1832,7 @@ def create_app(
     def create_outreach_draft(
         asset_id: str,
         payload: OutreachDraftCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> OutreachDraft:
@@ -1802,7 +1901,7 @@ def create_app(
     def update_outreach_draft(
         draft_id: str,
         payload: OutreachDraftUpdate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> OutreachDraft:
@@ -1846,7 +1945,7 @@ def create_app(
     )
     def create_report(
         project_id: str,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> ClearanceReport:
@@ -1951,7 +2050,7 @@ def create_app(
     def download_report_pdf(
         project_id: str,
         report_id: str,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> Response:
@@ -1987,7 +2086,7 @@ def create_app(
     def create_review_share(
         project_id: str,
         payload: ReviewShareCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
@@ -2025,7 +2124,7 @@ def create_app(
     )
     def list_review_shares(
         project_id: str,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> list[ReviewShare]:
@@ -2046,7 +2145,7 @@ def create_app(
     def revoke_review_share(
         project_id: str,
         share_id: str,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> ReviewShare:
@@ -2119,7 +2218,7 @@ def create_app(
     )
     def create_api_key(
         payload: ApiKeyCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> dict[str, object]:
@@ -2154,7 +2253,7 @@ def create_app(
         tags=["integrations"],
     )
     def list_api_keys(
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> list[ApiKey]:
@@ -2168,7 +2267,7 @@ def create_app(
     )
     def revoke_api_key(
         key_id: str,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> ApiKey:
@@ -2199,7 +2298,7 @@ def create_app(
     )
     def create_webhook(
         payload: WebhookEndpointCreate,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> WebhookEndpoint:
@@ -2235,7 +2334,7 @@ def create_app(
         tags=["integrations"],
     )
     def list_webhooks(
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> list[WebhookEndpoint]:
@@ -2249,7 +2348,7 @@ def create_app(
     )
     def toggle_webhook(
         webhook_id: str,
-        x_actor_id: str | None = Header(default=None),
+        x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
     ) -> WebhookEndpoint:

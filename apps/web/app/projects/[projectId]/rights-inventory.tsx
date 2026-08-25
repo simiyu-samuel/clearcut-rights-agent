@@ -1,5 +1,6 @@
 "use client";
 
+import { authorizedFetch as fetch } from "@/lib/api-client";
 import { useEffect, useMemo, useState } from "react";
 
 type RightsInventoryProps = { projectId: string };

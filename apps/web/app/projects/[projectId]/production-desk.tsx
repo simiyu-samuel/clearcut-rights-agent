@@ -1,5 +1,6 @@
 "use client";
 
+import { authorizedFetch as fetch } from "@/lib/api-client";
 import { useEffect, useRef, useState } from "react";
 
 type ProductionDeskProps = { projectId: string };

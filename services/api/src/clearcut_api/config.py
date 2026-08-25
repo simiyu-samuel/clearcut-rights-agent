@@ -10,6 +10,10 @@ load_dotenv()
 @dataclass(frozen=True)
 class Settings:
     environment: str = os.getenv("ENVIRONMENT", "development")
+    auth_mode: str = os.getenv(
+        "AUTH_MODE", "demo" if os.getenv("ENVIRONMENT", "development") == "development" else "identity_platform"
+    )
+    auth_audience: str | None = os.getenv("AUTH_AUDIENCE") or None
     database_url: str | None = os.getenv("DATABASE_URL") or None
     database_name: str = os.getenv("DATABASE_NAME", "clearcut")
     database_user: str | None = os.getenv("DATABASE_USER") or None

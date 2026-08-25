@@ -1,0 +1,5 @@
+"use client";
+
+export function ProjectSettings({ project }: { project: { title: string; project_type: string; territories: string[]; distribution_modes: string[]; target_release_at: string | null } }) {
+  return <section className="panel project-settings-panel"><div className="panel-header"><div><h2>Project configuration</h2><span>Production context used by clearance workflows</span></div></div><div className="settings-summary-grid"><div><span>Title</span><strong>{project.title}</strong></div><div><span>Format</span><strong>{project.project_type}</strong></div><div><span>Territories</span><strong>{project.territories.join(", ") || "Not set"}</strong></div><div><span>Distribution</span><strong>{project.distribution_modes.join(", ") || "Not set"}</strong></div><div><span>Target release</span><strong>{project.target_release_at ? new Date(project.target_release_at).toLocaleDateString("en-GB") : "Not set"}</strong></div></div><div className="disclaimer"><strong>Project settings are intentionally read-only in this release.</strong><br />Editing production context will be added with an auditable change history.</div></section>;
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import { authorizedFetch as fetch } from "@/lib/api-client";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 

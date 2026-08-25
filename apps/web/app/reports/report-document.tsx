@@ -1,5 +1,6 @@
 "use client";
 
+import { authorizedFetch as fetch } from "@/lib/api-client";
 import { useMemo, useState } from "react";
 import type { ClearanceReport, Project } from "@/lib/types";
 

@@ -1,8 +1,9 @@
 "use client";
 
+import { authorizedFetch as fetch } from "@/lib/api-client";
 import { useEffect, useMemo, useState } from "react";
 
-type ReviewQueueProps = { projectId: string };
+type ReviewQueueProps = { projectId: string; mode?: "review" | "requests" };
 
 type Asset = {
   id: string;
@@ -62,7 +63,7 @@ const decisions = [
   { value: "escalate_to_legal", label: "Escalate to legal" },
 ] as const;
 
-export function ReviewQueue({ projectId }: ReviewQueueProps) {
+export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [cards, setCards] = useState<ClearanceCard[]>([]);
   const [sourcesByRun, setSourcesByRun] = useState<Record<string, SourceRecord[]>>({});
@@ -146,6 +147,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
     }
     return [...unique.values()];
   }, [cards]);
+  const visibleCards = mode === "requests" ? latestCards.filter((card) => draftsByCard[card.id]) : latestCards;
 
   async function recordDecision(card: ClearanceCard, decision: (typeof decisions)[number]["value"]) {
     setBusyCard(card.id);
@@ -269,16 +271,16 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
     <section className="review-panel panel" id="review-queue">
       <div className="panel-header">
         <div>
-          <h2>AI clearance cards</h2>
-          <p className="panel-subtitle">Evidence-backed triage awaiting a producer decision</p>
+          <h2>{mode === "requests" ? "Permission requests" : "AI clearance cards"}</h2>
+          <p className="panel-subtitle">{mode === "requests" ? "Track approval, sending, and response status for rights outreach" : "Evidence-backed triage awaiting a producer decision"}</p>
         </div>
-        <span>{loading ? "Loading" : `${latestCards.length} cards`}</span>
+        <span>{loading ? "Loading" : mode === "requests" ? `${visibleCards.length} requests` : `${latestCards.length} cards`}</span>
       </div>
       {message ? <div className="review-message" role="status">{message}</div> : null}
-      {!loading && !message && latestCards.length === 0 && assetsWithoutCards.length === 0 ? (
-        <div className="review-empty">Upload a screenplay, start analysis, and extract assets to begin review.</div>
+      {!loading && !message && visibleCards.length === 0 && (mode === "requests" || assetsWithoutCards.length === 0) ? (
+        <div className="review-empty">{mode === "requests" ? "No permission requests have been drafted yet. Create one from a clearance card in Review." : "Upload a screenplay, start analysis, and extract assets to begin review."}</div>
       ) : null}
-      {!loading && !message && assetsWithoutCards.length > 0 ? (
+      {!loading && mode === "review" && !message && assetsWithoutCards.length > 0 ? (
         <div className="asset-research-list">
           {assetsWithoutCards.map((asset) => (
             <div className="asset-research-row" key={asset.id}>
@@ -291,7 +293,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
         </div>
       ) : null}
       <div className="clearance-grid">
-        {latestCards.map((card) => {
+        {visibleCards.map((card) => {
           const asset = assetById.get(card.asset_id);
           const approvals = approvalsByAsset[card.asset_id] ?? [];
           const latestApproval = approvals[0];
@@ -340,7 +342,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
                   </div>
                 </details>
               ) : null}
-              {card.needs_human_review ? (
+              {mode === "review" && card.needs_human_review ? (
                 <div className="review-actions">
                   {decisions.map((decision) => (
                     <button className={decision.value === "approve_next_action" ? "primary-button" : "secondary-button"} disabled={busyCard === card.id} key={decision.value} onClick={() => void recordDecision(card, decision.value)} type="button">
@@ -351,7 +353,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
                     {draftingCard === card.id ? "Drafting…" : "Draft permission request"}
                   </button>
                 </div>
-              ) : (
+              ) : mode === "review" ? (
                 <>
                   <div className="review-complete">Decision recorded · {card.generated_by} card</div>
                   <div className="review-actions">
@@ -360,7 +362,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
                     </button>
                   </div>
                 </>
-              )}
+              ) : null}
               {draftsByCard[card.id] ? (
                 <details className="draft-preview" open>
                   <summary>Permission request draft · {draftsByCard[card.id].status}</summary>

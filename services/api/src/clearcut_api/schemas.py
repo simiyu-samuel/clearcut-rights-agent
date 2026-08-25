@@ -97,6 +97,22 @@ class OrganizationRead(BaseModel):
     updated_at: datetime
 
 
+class OrganizationCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    slug: str | None = Field(default=None, min_length=2, max_length=120)
+
+
+class AuthIdentityRead(BaseModel):
+    actor_id: str
+    email: str | None
+    display_name: str
+
+
+class AuthMeRead(BaseModel):
+    identity: AuthIdentityRead
+    memberships: list[MembershipRead]
+
+
 class AnalysisRunCreate(BaseModel):
     document_id: str | None = Field(default=None, max_length=120)
 

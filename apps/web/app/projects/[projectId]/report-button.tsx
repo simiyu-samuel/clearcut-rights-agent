@@ -1,5 +1,6 @@
 "use client";
 
+import { authorizedFetch as fetch } from "@/lib/api-client";
 import Link from "next/link";
 import type { Route } from "next";
 import { useEffect, useState } from "react";

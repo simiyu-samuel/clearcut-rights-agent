@@ -1,5 +1,6 @@
 "use client";
 
+import { authorizedFetch as fetch } from "@/lib/api-client";
 import { useEffect, useState } from "react";
 
 type ProjectHealthProps = { projectId: string };

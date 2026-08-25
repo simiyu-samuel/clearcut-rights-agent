@@ -53,6 +53,14 @@ class MembershipRepository:
         )
         return self.session.scalar(statement)
 
+    def list_for_actor(self, actor_id: str) -> list[Membership]:
+        statement = (
+            select(Membership)
+            .where(Membership.actor_id == actor_id, Membership.status == "active")
+            .order_by(Membership.created_at.asc())
+        )
+        return list(self.session.scalars(statement))
+
     def list_for_organization(self, organization_id: str) -> list[Membership]:
         statement = (
             select(Membership)

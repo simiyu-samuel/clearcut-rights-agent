@@ -226,7 +226,15 @@ For the web app, keep the browser-safe API URL in `apps/web/.env.local`:
 
 ```dotenv
 NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_AUTH_MODE=demo
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
 ```
+
+For the shared deployment, switch both API and web auth modes to `identity_platform`, enable the Identity Platform API, configure the Google and Email/Password sign-in providers, and pass the Firebase Web app values through the Cloud Build substitutions documented in [`infra/README.md`](../infra/README.md). The web client supports Google popup sign-in, email/password registration and sign-in, and password reset. Firebase Web app configuration is browser-visible by design; no service-account JSON or refresh token belongs in `.env` or the repository. Firebase's built-in provider is email/password rather than username-only authentication; a separate username mapping can be added later if product requirements call for it.
 
 The last two values remain local-development defaults. For staging/production they will become Cloud SQL and Cloud Storage configuration, with credentials supplied through Google Cloud identity and Secret Manager.
 

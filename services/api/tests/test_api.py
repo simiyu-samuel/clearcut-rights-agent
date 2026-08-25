@@ -25,6 +25,8 @@ def test_system_routes_are_registered() -> None:
     routes = {route.path for route in app.routes}
     assert {"/healthz", "/health", "/readyz", "/openapi.json"}.issubset(routes)
     assert {
+        "/v1/auth/me",
+        "/v1/organizations",
         "/v1/projects/{project_id}/approvals",
         "/v1/assets/{asset_id}/approvals",
         "/v1/projects/{project_id}/delivery-readiness",

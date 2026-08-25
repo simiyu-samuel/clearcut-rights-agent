@@ -1,5 +1,6 @@
 "use client";
 
+import { authorizedFetch as fetch } from "@/lib/api-client";
 import { useEffect, useState } from "react";
 
 type Activity = { id: string; action: string; actor_id: string; resource_type: string; resource_id: string; created_at: string; metadata_json: string | null };
