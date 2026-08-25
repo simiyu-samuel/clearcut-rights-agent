@@ -31,6 +31,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (auth.status === "configuration_error") {
     return <main className="auth-screen"><Brand /><div className="auth-card panel"><span className="eyebrow">Workspace configuration</span><h1>Authentication needs setup.</h1><p>Set the Firebase client configuration and API audience before using Identity Platform mode.</p></div></main>;
   }
+  if (auth.status === "workspace_error") {
+    return <main className="auth-screen"><Brand /><div className="auth-card panel"><span className="eyebrow">Workspace access</span><h1>We could not load your workspace.</h1><p>{auth.errorMessage ?? "Refresh and try again."}</p><button className="primary-button" onClick={() => window.location.reload()} type="button">Refresh workspace</button></div></main>;
+  }
   if (auth.status === "signed_out") {
     async function signInGoogle() {
       setSignInMessage("");

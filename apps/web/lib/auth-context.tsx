@@ -35,7 +35,8 @@ type AuthUser = {
 };
 
 type AuthContextValue = {
-  status: "loading" | "signed_out" | "authenticated" | "configuration_error";
+  status: "loading" | "signed_out" | "authenticated" | "configuration_error" | "workspace_error";
+  errorMessage: string | null;
   user: AuthUser | null;
   memberships: Membership[];
   organizationId: string | null;
@@ -84,6 +85,7 @@ async function loadIdentity(user: User): Promise<AuthMeResponse> {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthContextValue["status"]>("loading");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
@@ -129,7 +131,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setStatus("authenticated");
         })
         .catch(() => {
-          if (active) setStatus("configuration_error");
+          if (active) {
+            setErrorMessage("Unable to load workspace access. Refresh and try again.");
+            setStatus("workspace_error");
+          }
         });
     });
     return () => {
@@ -141,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
+      errorMessage,
       user,
       memberships,
       organizationId,
@@ -171,7 +177,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setOrganizationId(selectedOrganizationId);
       },
     }),
-    [memberships, organizationId, status, user],
+    [errorMessage, memberships, organizationId, status, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

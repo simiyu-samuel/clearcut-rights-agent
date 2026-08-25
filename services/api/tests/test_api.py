@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from clearcut_api.db import Database
-from clearcut_api.main import create_app
+from clearcut_api.main import as_utc, create_app
 from clearcut_api.models import (
     Approval,
     Asset,
@@ -115,6 +115,14 @@ def test_invitation_id_is_available_for_audit_event_before_flush() -> None:
 
         audit_event = session.query(AuditEvent).one()
         assert audit_event.resource_id == "invitation-for-audit"
+
+
+def test_as_utc_normalizes_sqlite_naive_datetimes() -> None:
+    naive = datetime(2026, 8, 25, 12, 0, 0)
+    aware = datetime(2026, 8, 25, 12, 0, 0, tzinfo=UTC)
+
+    assert as_utc(naive) == aware
+    assert as_utc(aware) == aware
 
 
 def test_project_lifecycle_and_tenant_scope() -> None:

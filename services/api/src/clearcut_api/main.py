@@ -141,6 +141,13 @@ ALLOWED_TEXT_MIME_TYPES = {"text/plain", "text/markdown", "application/octet-str
 request_logger = logging.getLogger("clearcut.request")
 
 
+def as_utc(value: datetime) -> datetime:
+    """Normalize datetimes returned by SQLite and timezone-aware databases."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def create_app(
     database: Database | None = None, storage: ObjectStore | None = None
 ) -> FastAPI:
@@ -443,7 +450,7 @@ def create_app(
             pending_invitations = invitation_repository.list_pending_for_email(normalized_email)
             changed = False
             for invitation in pending_invitations:
-                if invitation.expires_at <= now:
+                if as_utc(invitation.expires_at) <= now:
                     invitation.status = "expired"
                     invitation.updated_at = now
                     changed = True
@@ -650,7 +657,7 @@ def create_app(
         invitations = OrganizationInvitationRepository(session).list_for_organization(organization_id)
         changed = False
         for invitation in invitations:
-            if invitation.status == "pending" and invitation.expires_at <= now:
+            if invitation.status == "pending" and as_utc(invitation.expires_at) <= now:
                 invitation.status = "expired"
                 invitation.updated_at = now
                 changed = True
@@ -677,7 +684,7 @@ def create_app(
             raise HTTPException(status_code=422, detail="valid_email_required")
         repository = OrganizationInvitationRepository(session)
         existing = repository.pending_for_email(organization_id, email)
-        if existing is not None and existing.expires_at > datetime.now(UTC):
+        if existing is not None and as_utc(existing.expires_at) > datetime.now(UTC):
             raise HTTPException(status_code=409, detail="invitation_already_pending")
         invitation = OrganizationInvitation(
             id=str(uuid4()),
@@ -1322,7 +1329,7 @@ def create_app(
         unresolved_assets = max(len(assets) - clear_assets, 0)
         now = datetime.now(UTC)
         stale_rechecks = sum(
-            recheck.active and recheck.next_run_at <= now
+            recheck.active and as_utc(recheck.next_run_at) <= now
             for recheck in ResearchRecheckRepository(session).list_for_project(
                 project_id, organization_id
             )
@@ -2319,7 +2326,7 @@ def create_app(
         if (
             share is None
             or share.revoked_at is not None
-            or (share.expires_at is not None and share.expires_at <= datetime.now(UTC))
+            or (share.expires_at is not None and as_utc(share.expires_at) <= datetime.now(UTC))
         ):
             raise HTTPException(status_code=404, detail="review_share_not_found")
         project = ProjectRepository(session).get(share.project_id, share.organization_id)
