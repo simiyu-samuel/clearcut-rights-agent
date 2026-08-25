@@ -378,6 +378,18 @@ button { font: inherit; }
 .card-evidence a { color: var(--blue); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-evidence small { font-size: 9px; }
 .card-evidence em { color: var(--subtle); font-size: 10px; font-style: normal; }
+.latest-decision { background: rgba(127, 212, 161, 0.06); border: 1px solid rgba(127, 212, 161, 0.18); display: grid; gap: 4px; margin-top: 16px; padding: 10px 11px; }
+.latest-decision span, .decision-history summary { color: var(--subtle); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+.latest-decision strong { color: var(--green); font-size: 11px; font-weight: 600; text-transform: capitalize; }
+.latest-decision small { color: var(--muted); font-size: 9px; }
+.decision-history { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.decision-history summary { cursor: pointer; list-style-position: inside; }
+.decision-history-list { display: grid; gap: 8px; margin-top: 10px; }
+.decision-history-row { border-left: 2px solid var(--gold-soft); display: grid; gap: 5px; padding-left: 10px; }
+.decision-history-row > div { display: flex; flex-wrap: wrap; gap: 7px; align-items: baseline; }
+.decision-history-row strong { font-size: 10px; text-transform: capitalize; }
+.decision-history-row small { color: var(--subtle); font-size: 9px; }
+.decision-history-row p { color: var(--muted); font-size: 10px; line-height: 1.45; margin: 0; }
 .review-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
 .review-actions button { font-size: 10px; padding: 9px 10px; }
 .review-complete { color: var(--green); font-size: 10px; margin-top: 18px; }

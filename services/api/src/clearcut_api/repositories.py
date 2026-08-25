@@ -384,6 +384,30 @@ class ApprovalRepository:
         )
         return self.session.scalars(statement).first()
 
+    def list_for_asset(self, asset_id: str, organization_id: str) -> list[Approval]:
+        statement = (
+            select(Approval)
+            .where(
+                Approval.asset_id == asset_id,
+                Approval.organization_id == organization_id,
+            )
+            .order_by(Approval.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
+    def list_for_project(self, project_id: str, organization_id: str) -> list[Approval]:
+        statement = (
+            select(Approval)
+            .join(Asset, Asset.id == Approval.asset_id)
+            .where(
+                Asset.project_id == project_id,
+                Asset.organization_id == organization_id,
+                Approval.organization_id == organization_id,
+            )
+            .order_by(Approval.created_at.desc())
+        )
+        return list(self.session.scalars(statement))
+
 
 class AuditRepository:
     def __init__(self, session: Session):

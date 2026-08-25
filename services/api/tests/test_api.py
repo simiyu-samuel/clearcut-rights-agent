@@ -1,11 +1,13 @@
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from clearcut_api.db import Database
 from clearcut_api.main import create_app
-from clearcut_api.models import Base, Job, Project
-from clearcut_api.repositories import JobRepository, ProjectRepository
+from clearcut_api.models import Approval, Asset, Base, ClearanceCard, Job, Project
+from clearcut_api.repositories import ApprovalRepository, JobRepository, ProjectRepository
 
 
 def make_database() -> Database:
@@ -22,6 +24,10 @@ def test_system_routes_are_registered() -> None:
     app = create_app(make_database())
     routes = {route.path for route in app.routes}
     assert {"/healthz", "/health", "/readyz", "/openapi.json"}.issubset(routes)
+    assert {
+        "/v1/projects/{project_id}/approvals",
+        "/v1/assets/{asset_id}/approvals",
+    }.issubset(routes)
     assert app.title == "ClearCut API"
 
 
@@ -59,3 +65,86 @@ def test_analysis_run_is_queued_for_async_processing() -> None:
         assert stored is not None
         assert stored.project_id == project.id
         assert stored.status == "queued"
+
+
+def test_approval_history_is_newest_first_and_tenant_scoped() -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        project = ProjectRepository(session).create(
+            Project(organization_id="studio-a", title="North Star", project_type="Series")
+        )
+        other_project = ProjectRepository(session).create(
+            Project(organization_id="studio-b", title="Other project", project_type="Feature film")
+        )
+        asset = Asset(
+            organization_id="studio-a",
+            project_id=project.id,
+            document_id="document-a",
+            canonical_name="Midnight City",
+            category="Music",
+            context="Radio in scene 4",
+            source_start=1,
+            source_end=2,
+            extraction_confidence=0.9,
+        )
+        other_org_asset = Asset(
+            organization_id="studio-b",
+            project_id=other_project.id,
+            document_id="document-b",
+            canonical_name="Other asset",
+            category="Prop",
+            context="Background detail",
+            source_start=3,
+            source_end=4,
+            extraction_confidence=0.9,
+        )
+        session.add_all([asset, other_org_asset])
+        session.flush()
+        card = ClearanceCard(
+            organization_id="studio-a",
+            asset_id=asset.id,
+            research_run_id="run-a",
+            generated_by="vertex_gemini",
+            risk_score=80,
+            confidence_score=0.8,
+            summary="Needs review",
+            recommendation="Confirm rights",
+        )
+        session.add(card)
+        session.flush()
+        newest = Approval(
+            organization_id="studio-a",
+            asset_id=asset.id,
+            clearance_card_id=card.id,
+            decision="escalate_to_legal",
+            actor_id="legal-reviewer",
+            created_at=datetime.now(UTC),
+        )
+        older = Approval(
+            organization_id="studio-a",
+            asset_id=asset.id,
+            clearance_card_id=card.id,
+            decision="request_more_research",
+            actor_id="producer",
+            created_at=datetime.now(UTC) - timedelta(minutes=5),
+        )
+        hidden = Approval(
+            organization_id="studio-b",
+            asset_id=other_org_asset.id,
+            clearance_card_id="card-b",
+            decision="approve_next_action",
+            actor_id="other-reviewer",
+        )
+        session.add_all([newest, older, hidden])
+        session.commit()
+
+        repository = ApprovalRepository(session)
+        assert [item.id for item in repository.list_for_asset(asset.id, "studio-a")] == [
+            newest.id,
+            older.id,
+        ]
+        assert [item.id for item in repository.list_for_project(project.id, "studio-a")] == [
+            newest.id,
+            older.id,
+        ]
+        assert repository.list_for_asset(asset.id, "studio-b") == []

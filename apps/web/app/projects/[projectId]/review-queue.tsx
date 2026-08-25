@@ -35,6 +35,17 @@ type SourceRecord = {
   source_quality: string;
 };
 
+type Approval = {
+  id: string;
+  asset_id: string;
+  clearance_card_id: string;
+  decision: string;
+  note: string | null;
+  actor_id: string;
+  supersedes_id: string | null;
+  created_at: string;
+};
+
 type OutreachDraft = {
   id: string;
   subject: string;
@@ -52,6 +63,7 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [cards, setCards] = useState<ClearanceCard[]>([]);
   const [sourcesByRun, setSourcesByRun] = useState<Record<string, SourceRecord[]>>({});
+  const [approvalsByAsset, setApprovalsByAsset] = useState<Record<string, Approval[]>>({});
   const [draftsByCard, setDraftsByCard] = useState<Record<string, OutreachDraft>>({});
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -66,15 +78,17 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
     setMessage("");
     try {
       const headers = { "x-organization-id": "demo-org" };
-      const [assetsResponse, cardsResponse] = await Promise.all([
+      const [assetsResponse, cardsResponse, approvalsResponse] = await Promise.all([
         fetch(`${apiUrl}/v1/projects/${projectId}/assets`, { headers }),
         fetch(`${apiUrl}/v1/projects/${projectId}/clearance-cards`, { headers }),
+        fetch(`${apiUrl}/v1/projects/${projectId}/approvals`, { headers }),
       ]);
-      if (!assetsResponse.ok || !cardsResponse.ok) {
+      if (!assetsResponse.ok || !cardsResponse.ok || !approvalsResponse.ok) {
         throw new Error("The review API is not available yet.");
       }
       const nextAssets: Asset[] = await assetsResponse.json();
       const nextCards: ClearanceCard[] = await cardsResponse.json();
+      const nextApprovals: Approval[] = await approvalsResponse.json();
       const sourceEntries = await Promise.all(
         nextCards.map(async (card) => {
           const response = await fetch(`${apiUrl}/v1/research-runs/${card.research_run_id}/sources`, { headers });
@@ -83,6 +97,12 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
       );
       setAssets(nextAssets);
       setCards(nextCards);
+      setApprovalsByAsset(
+        nextApprovals.reduce<Record<string, Approval[]>>((grouped, approval) => {
+          grouped[approval.asset_id] = [...(grouped[approval.asset_id] ?? []), approval];
+          return grouped;
+        }, {}),
+      );
       setSourcesByRun(Object.fromEntries(sourceEntries));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to load the review queue.");
@@ -234,6 +254,8 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
       <div className="clearance-grid">
         {latestCards.map((card) => {
           const asset = assetById.get(card.asset_id);
+          const approvals = approvalsByAsset[card.asset_id] ?? [];
+          const latestApproval = approvals[0];
           return (
             <article className="clearance-card" key={card.id}>
               <div className="clearance-card-head">
@@ -256,6 +278,29 @@ export function ReviewQueue({ projectId }: ReviewQueueProps) {
                 {(sourcesByRun[card.research_run_id] ?? []).map((source) => <a href={source.url} key={source.id} rel="noreferrer" target="_blank">{source.title} <small>↗</small></a>)}
                 {(sourcesByRun[card.research_run_id] ?? []).length === 0 ? <em>No source records returned.</em> : null}
               </div>
+              {latestApproval ? (
+                <div className="latest-decision">
+                  <span>Latest reviewer decision</span>
+                  <strong>{latestApproval.decision.replaceAll("_", " ")}</strong>
+                  <small>by {latestApproval.actor_id} · {new Date(latestApproval.created_at).toLocaleString()}</small>
+                </div>
+              ) : null}
+              {approvals.length > 0 ? (
+                <details className="decision-history">
+                  <summary>Decision history · {approvals.length} {approvals.length === 1 ? "entry" : "entries"}</summary>
+                  <div className="decision-history-list">
+                    {approvals.map((approval) => (
+                      <div className="decision-history-row" key={approval.id}>
+                        <div>
+                          <strong>{approval.decision.replaceAll("_", " ")}</strong>
+                          <small>{approval.actor_id} · {new Date(approval.created_at).toLocaleString()}</small>
+                        </div>
+                        {approval.note ? <p>{approval.note}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
               {card.needs_human_review ? (
                 <div className="review-actions">
                   {decisions.map((decision) => (

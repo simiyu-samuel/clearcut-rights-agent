@@ -511,6 +511,19 @@ def create_app(
         require_project(session, project_id, organization_id)
         return ClearanceCardRepository(session).list_for_project(project_id, organization_id)
 
+    @app.get(
+        "/v1/projects/{project_id}/approvals",
+        response_model=list[ApprovalRead],
+        tags=["review"],
+    )
+    def list_project_approvals(
+        project_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[Approval]:
+        require_project(session, project_id, organization_id)
+        return ApprovalRepository(session).list_for_project(project_id, organization_id)
+
     @app.post(
         "/v1/projects/{project_id}/analysis-runs",
         response_model=JobRead,
@@ -786,6 +799,21 @@ def create_app(
         if card is None:
             raise HTTPException(status_code=404, detail="clearance_card_not_found")
         return card
+
+    @app.get(
+        "/v1/assets/{asset_id}/approvals",
+        response_model=list[ApprovalRead],
+        tags=["review"],
+    )
+    def list_asset_approvals(
+        asset_id: str,
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[Approval]:
+        asset = AssetRepository(session).get(asset_id, organization_id)
+        if asset is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        return ApprovalRepository(session).list_for_asset(asset_id, organization_id)
 
     @app.post(
         "/v1/assets/{asset_id}/approvals",
