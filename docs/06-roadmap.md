@@ -48,6 +48,7 @@ We will build one polished vertical slice first, then expand around stable domai
 ### Phase 3 — production workspace
 
 - rough-cut timeline and timestamped observations;
+- resumable video/audio ingestion with transcript and timestamped rights signals;
 - subtitle and localization review;
 - configurable policy engine;
 - rights request and response tracking;
@@ -75,6 +76,8 @@ We will build one polished vertical slice first, then expand around stable domai
 - `DOC-003` Parse supported screenplay formats.
 - `DOC-004` Store scenes and source spans.
 - `DOC-005` Reject unsafe or unsupported uploads.
+- `DOC-006` Ingest video/audio through resumable Cloud Storage uploads.
+- `DOC-007` Persist media transcript, duration, segments, and source metadata.
 
 ### Asset intelligence
 
@@ -82,6 +85,7 @@ We will build one polished vertical slice first, then expand around stable domai
 - `ASSET-002` Extract candidate rights-bearing assets.
 - `ASSET-003` Deduplicate mentions across document versions.
 - `ASSET-004` Support user correction of extracted assets.
+- `ASSET-005` Extract timestamped visible and audible rights signals from media.
 
 ### Parallel integration
 
@@ -143,4 +147,3 @@ A feature is done only when:
 - documentation explains local and hosted behavior;
 - no secrets or generated artifacts are committed;
 - the feature is demonstrated in the deployed environment when applicable.
-

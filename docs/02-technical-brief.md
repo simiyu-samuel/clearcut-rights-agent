@@ -154,8 +154,11 @@ The first API should expose resource-oriented endpoints:
 ```text
 POST   /v1/projects
 GET    /v1/projects/{project_id}
-POST   /v1/projects/{project_id}/documents
-POST   /v1/projects/{project_id}/analysis-runs
+    POST   /v1/projects/{project_id}/documents
+    POST   /v1/projects/{project_id}/media
+    POST   /v1/projects/{project_id}/media-uploads
+    POST   /v1/documents/{document_id}/complete-upload
+    POST   /v1/projects/{project_id}/analysis-runs
 GET    /v1/projects/{project_id}/assets
 GET    /v1/projects/{project_id}/clearance-cards
 GET    /v1/assets/{asset_id}

@@ -101,6 +101,8 @@ from .schemas import (
     DocumentDiffRead,
     DocumentRead,
     JobRead,
+    MediaUploadInit,
+    MediaUploadSessionRead,
     MembershipRead,
     NotificationRead,
     OrganizationCreate,
@@ -138,6 +140,43 @@ from .workflows import (
 
 ALLOWED_TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
 ALLOWED_TEXT_MIME_TYPES = {"text/plain", "text/markdown", "application/octet-stream"}
+ALLOWED_MEDIA_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".mkv",
+    ".mpeg",
+    ".mpg",
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".ogg",
+}
+ALLOWED_MEDIA_MIME_TYPES = {
+    "video/mp4",
+    "video/quicktime",
+    "video/webm",
+    "video/x-matroska",
+    "video/mpeg",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mp4",
+    "audio/webm",
+    "audio/ogg",
+}
+MEDIA_MIME_BY_EXTENSION = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".mpeg": "video/mpeg",
+    ".mpg": "video/mpeg",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+}
 request_logger = logging.getLogger("clearcut.request")
 
 
@@ -924,6 +963,222 @@ def create_app(
         session.refresh(created)
         return created
 
+    @app.post(
+        "/v1/projects/{project_id}/media",
+        response_model=DocumentRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["media"],
+    )
+    async def upload_media(
+        project_id: str,
+        file: UploadFile = File(...),
+        x_actor_id: str | None = Depends(get_actor_id),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Document:
+        """Bounded multipart fallback for local development and small media samples."""
+        require_project(session, project_id, organization_id)
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator"})
+        filename = Path(file.filename or "upload.mp4").name
+        extension = Path(filename).suffix.lower()
+        content_type = (file.content_type or "application/octet-stream").lower()
+        if content_type == "application/octet-stream":
+            content_type = MEDIA_MIME_BY_EXTENSION.get(extension, content_type)
+        if extension not in ALLOWED_MEDIA_EXTENSIONS or (
+            content_type not in ALLOWED_MEDIA_MIME_TYPES
+            and content_type != "application/octet-stream"
+        ):
+            raise HTTPException(status_code=415, detail="unsupported_media_type")
+        content = await file.read(settings.max_media_upload_bytes + 1)
+        if len(content) > settings.max_media_upload_bytes:
+            raise HTTPException(status_code=413, detail="media_multipart_upload_too_large")
+        media_kind = "video" if content_type.startswith("video/") or extension in {
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".mpeg",
+            ".mpg",
+        } else "audio"
+        document_id = str(uuid4())
+        object_key = f"{organization_id}/{project_id}/{document_id}.media"
+        object_store.save_bytes(object_key, content)
+        previous = DocumentRepository(session).latest_for_project(project_id, organization_id)
+        document = Document(
+            id=document_id,
+            organization_id=organization_id,
+            project_id=project_id,
+            original_filename=filename,
+            mime_type=content_type,
+            size_bytes=len(content),
+            sha256=sha256(content).hexdigest(),
+            object_key=object_key,
+            extracted_text="",
+            source_kind=media_kind,
+            media_metadata={"upload_mode": "multipart"},
+            version_number=(previous.version_number + 1) if previous else 1,
+            parent_document_id=previous.id if previous else None,
+        )
+        created = DocumentRepository(session).create(document)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="media.uploaded",
+                resource_type="project",
+                resource_id=project_id,
+                metadata_json=json.dumps(
+                    {
+                        "document_id": created.id,
+                        "source_kind": media_kind,
+                        "version_number": created.version_number,
+                        "upload_mode": "multipart",
+                    }
+                ),
+            )
+        )
+        session.commit()
+        session.refresh(created)
+        return created
+
+    @app.post(
+        "/v1/projects/{project_id}/media-uploads",
+        response_model=MediaUploadSessionRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["media"],
+    )
+    def initiate_media_upload(
+        project_id: str,
+        payload: MediaUploadInit,
+        x_actor_id: str | None = Depends(get_actor_id),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> dict[str, object]:
+        """Create a Cloud Storage resumable upload session for production-size media."""
+        require_project(session, project_id, organization_id)
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator"})
+        filename = Path(payload.filename).name
+        extension = Path(filename).suffix.lower()
+        content_type = payload.mime_type.lower()
+        if content_type == "application/octet-stream":
+            content_type = MEDIA_MIME_BY_EXTENSION.get(extension, content_type)
+        if extension not in ALLOWED_MEDIA_EXTENSIONS or (
+            content_type not in ALLOWED_MEDIA_MIME_TYPES
+            and content_type != "application/octet-stream"
+        ):
+            raise HTTPException(status_code=415, detail="unsupported_media_type")
+        if payload.size_bytes > settings.max_media_size_bytes:
+            raise HTTPException(status_code=413, detail="media_too_large")
+        if not object_store.supports_resumable_uploads():
+            raise HTTPException(status_code=501, detail="resumable_media_upload_requires_gcs")
+
+        media_kind = "video" if content_type.startswith("video/") or extension in {
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".mkv",
+            ".mpeg",
+            ".mpg",
+        } else "audio"
+        document_id = str(uuid4())
+        object_key = f"{organization_id}/{project_id}/{document_id}.media"
+        try:
+            upload_url = object_store.create_resumable_upload_session(
+                object_key, content_type, payload.size_bytes
+            )
+        except Exception as exc:
+            request_logger.exception("media_upload_session_creation_failed")
+            raise HTTPException(status_code=503, detail="media_upload_session_unavailable") from exc
+        previous = DocumentRepository(session).latest_for_project(project_id, organization_id)
+        document = Document(
+            id=document_id,
+            organization_id=organization_id,
+            project_id=project_id,
+            original_filename=filename,
+            mime_type=content_type,
+            size_bytes=payload.size_bytes,
+            sha256="pending",
+            object_key=object_key,
+            extracted_text="",
+            source_kind=media_kind,
+            media_metadata={"upload_mode": "resumable", "upload_state": "started"},
+            status="uploading",
+            version_number=(previous.version_number + 1) if previous else 1,
+            parent_document_id=previous.id if previous else None,
+        )
+        created = DocumentRepository(session).create(document)
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="media.upload_started",
+                resource_type="project",
+                resource_id=project_id,
+                metadata_json=json.dumps(
+                    {"document_id": created.id, "source_kind": media_kind, "upload_mode": "resumable"}
+                ),
+            )
+        )
+        session.commit()
+        return {
+            "document_id": created.id,
+            "object_key": object_key,
+            "upload_url": upload_url,
+            "source_kind": media_kind,
+            "expires_in_seconds": 3600,
+        }
+
+    @app.post(
+        "/v1/documents/{document_id}/complete-upload",
+        response_model=DocumentRead,
+        tags=["media"],
+    )
+    def complete_media_upload(
+        document_id: str,
+        x_actor_id: str | None = Depends(get_actor_id),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Document:
+        actor_id = x_actor_id or "demo-user"
+        document = DocumentRepository(session).get(document_id, organization_id)
+        if document is None or document.source_kind not in {"video", "audio"}:
+            raise HTTPException(status_code=404, detail="media_document_not_found")
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator"})
+        try:
+            metadata = object_store.get_metadata(document.object_key)
+        except Exception as exc:
+            request_logger.exception("media_upload_completion_metadata_failed")
+            raise HTTPException(status_code=409, detail="media_upload_not_found") from exc
+        if metadata.size_bytes != document.size_bytes:
+            raise HTTPException(status_code=409, detail="media_size_mismatch")
+        document.status = "uploaded"
+        document.media_metadata = {
+            **(document.media_metadata or {}),
+            "upload_state": "complete",
+            "content_type": metadata.content_type or document.mime_type,
+            "md5_hash": metadata.md5_hash,
+        }
+        if document.sha256 == "pending":
+            document.sha256 = f"gcs-md5:{metadata.md5_hash or 'unavailable'}"
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="media.upload_completed",
+                resource_type="document",
+                resource_id=document.id,
+                metadata_json=json.dumps({"size_bytes": metadata.size_bytes}),
+            )
+        )
+        session.commit()
+        session.refresh(document)
+        return document
+
     @app.get(
         "/v1/projects/{project_id}/documents", response_model=list[DocumentRead], tags=["documents"]
     )
@@ -1568,14 +1823,16 @@ def create_app(
             x_actor_id or "demo-user",
             {"admin", "producer", "coordinator"},
         )
+        document: Document | None = None
         if payload.document_id is not None:
             document = DocumentRepository(session).get(payload.document_id, organization_id)
             if document is None or document.project_id != project_id:
                 raise HTTPException(status_code=404, detail="document_not_found")
+        job_type = "media_analysis" if document and document.source_kind in {"video", "audio"} else "document_analysis"
         job = Job(
             organization_id=organization_id,
             project_id=project_id,
-            job_type="document_analysis",
+            job_type=job_type,
             status="queued",
             metadata_json=json.dumps({"document_id": payload.document_id}),
         )

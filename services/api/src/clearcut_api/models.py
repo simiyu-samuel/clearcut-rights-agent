@@ -106,6 +106,8 @@ class Document(Base):
     sha256: Mapped[str] = mapped_column(String(64), index=True)
     object_key: Mapped[str] = mapped_column(String(500), unique=True)
     extracted_text: Mapped[str] = mapped_column(Text)
+    source_kind: Mapped[str] = mapped_column(String(20), default="document", index=True)
+    media_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     version_number: Mapped[int] = mapped_column(Integer, default=1)
     parent_document_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(40), default="uploaded", index=True)

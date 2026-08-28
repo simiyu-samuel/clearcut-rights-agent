@@ -1,0 +1,12 @@
+[
+  {
+    "origin": [
+      "https://clearcut-web-624697816945.us-central1.run.app",
+      "https://clearcut-web-lqty2et3xq-uc.a.run.app",
+      "http://localhost:3000"
+    ],
+    "method": ["PUT", "OPTIONS"],
+    "responseHeader": ["Content-Type", "ETag", "x-goog-generation", "x-goog-resumable"],
+    "maxAgeSeconds": 3600
+  }
+]

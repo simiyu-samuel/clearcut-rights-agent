@@ -75,3 +75,25 @@ alembic -c services/api/alembic.ini upgrade head
 ```
 
 The command reads the effective database configuration from the environment, including the Cloud SQL Unix-socket settings used by Cloud Run.
+
+## Video and audio ingestion
+
+Media sources are stored in the same source-version stream as screenplays. Small local
+development samples can use the multipart `/v1/projects/{project_id}/media` endpoint. The
+deployed GCS backend uses a resumable upload session from
+`/v1/projects/{project_id}/media-uploads`, followed by
+`/v1/documents/{document_id}/complete-upload`; this keeps large media out of the API request
+body. Starting the existing analysis run then sends the Cloud Storage URI to Vertex Gemini,
+which returns a transcript, timestamped segments, and visual/audio rights signals for human
+review.
+
+Configure the media bucket CORS policy after the web origin is known:
+
+```bash
+gcloud storage buckets update gs://${ASSET_BUCKET} \
+  --cors-file=infra/gcs-media-cors.json
+```
+
+The runtime service account needs object create/read access to the asset bucket and Vertex AI
+access. `MAX_MEDIA_UPLOAD_BYTES` controls the bounded multipart fallback (25 MiB by default),
+while `MAX_MEDIA_SIZE_BYTES` controls the maximum resumable media object (5 GiB by default).

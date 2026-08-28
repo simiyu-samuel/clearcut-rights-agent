@@ -11,6 +11,7 @@ from clearcut_api.agent_tools import (
 )
 from clearcut_api.config import Settings
 from clearcut_api.extraction import extract_candidate_assets
+from clearcut_api.media_analysis import VertexGeminiMediaAnalyzer
 from clearcut_api.models import (
     Asset,
     ClearanceCard,
@@ -118,6 +119,83 @@ def test_document_analysis_persists_assets_and_updates_job(tmp_path) -> None:
         assert stored_document is not None and stored_document.status == "analyzed"
         assert len(assets) == 1
         assert assets[0].canonical_name == "Midnight City"
+
+
+def test_media_analysis_persists_transcript_and_metadata(tmp_path) -> None:
+    database = make_database()
+    store = LocalObjectStore(str(tmp_path))
+    content = b"fixture media bytes"
+
+    with database.session_factory() as session:
+        project = ProjectRepository(session).create(
+            Project(
+                organization_id="demo-org", title="Media test", project_type="Feature film"
+            )
+        )
+        document = Document(
+            organization_id="demo-org",
+            project_id=project.id,
+            original_filename="screening-room.mp4",
+            mime_type="video/mp4",
+            size_bytes=len(content),
+            sha256="fixture-hash",
+            object_key="demo-org/media.source",
+            extracted_text="",
+            source_kind="video",
+        )
+        document = DocumentRepository(session).create(document)
+        store.save_bytes(document.object_key, content)
+        job = JobRepository(session).create(
+            Job(
+                organization_id="demo-org",
+                project_id=project.id,
+                job_type="media_analysis",
+                status="queued",
+            )
+        )
+
+    process_document_analysis(database, store, job.id, document.id, "demo-org")
+
+    with database.session_factory() as session:
+        stored_job = JobRepository(session).get(job.id, "demo-org")
+        stored_document = DocumentRepository(session).get(document.id, "demo-org")
+        assert stored_job is not None and stored_job.status == "awaiting_review"
+        assert stored_document is not None and stored_document.status == "analyzed"
+        assert stored_document.source_kind == "video"
+        assert "Fixture transcript" in stored_document.extracted_text
+        assert stored_document.media_metadata["provider"] == "fixture"
+        assert stored_document.media_metadata["asset_count"] == 1
+        assert AssetRepository(session).list_for_project(project.id, "demo-org")[0].canonical_name == "Sample music bed"
+
+
+def test_vertex_media_payload_normalizes_timestamped_rights_signals() -> None:
+    output = VertexGeminiMediaAnalyzer._parse_output(
+        """
+        {
+          "summary": "A branded radio spot plays in the scene.",
+          "transcript": "This is a test.",
+          "duration_seconds": 65.5,
+          "segments": [{"start_seconds": 42, "end_seconds": 48, "description": "Radio"}],
+          "assets": [{
+            "name": "Midnight City",
+            "category": "music",
+            "context": "The track is audible from a radio.",
+            "start_seconds": 42,
+            "end_seconds": 48,
+            "confidence": 0.91,
+            "risk_status": "high_risk",
+            "reason_codes": ["recorded_music_signal"]
+          }]
+        }
+        """,
+        "video/mp4",
+        "gemini-2.5-flash",
+    )
+
+    assert output.metadata["duration_seconds"] == 65.5
+    assert output.candidates[0].scene_reference == "00:00:42"
+    assert output.candidates[0].source_start == 42
+    assert "video_visual_or_audio_signal" in output.candidates[0].reason_codes
 
 
 def test_parallel_search_response_is_normalized() -> None:

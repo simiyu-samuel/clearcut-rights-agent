@@ -30,6 +30,12 @@ class Settings:
     storage_root: str = os.getenv("STORAGE_ROOT", ".data/uploads")
     gcs_bucket_name: str | None = os.getenv("GCS_BUCKET_NAME") or None
     max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))
+    max_media_upload_bytes: int = int(
+        os.getenv("MAX_MEDIA_UPLOAD_BYTES", str(25 * 1024 * 1024))
+    )
+    max_media_size_bytes: int = int(
+        os.getenv("MAX_MEDIA_SIZE_BYTES", str(5 * 1024 * 1024 * 1024))
+    )
     web_allowed_origins: str = os.getenv("WEB_ALLOWED_ORIGINS", "http://localhost:3000")
 
     def resolved_database_url(self) -> str:

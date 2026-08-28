@@ -5,7 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ProjectStatus = Literal["draft", "active", "review", "complete", "archived"]
 JobStatus = Literal["queued", "running", "awaiting_review", "completed", "failed"]
-DocumentStatus = Literal["uploaded", "processing", "analyzed", "failed"]
+DocumentStatus = Literal["uploading", "uploaded", "processing", "analyzed", "failed"]
+DocumentSourceKind = Literal["document", "video", "audio"]
 RiskStatus = Literal[
     "high_risk",
     "needs_review",
@@ -135,6 +136,20 @@ class AnalysisRunCreate(BaseModel):
     document_id: str | None = Field(default=None, max_length=120)
 
 
+class MediaUploadInit(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(min_length=3, max_length=120)
+    size_bytes: int = Field(gt=0)
+
+
+class MediaUploadSessionRead(BaseModel):
+    document_id: str
+    object_key: str
+    upload_url: str
+    source_kind: DocumentSourceKind
+    expires_in_seconds: int
+
+
 class JobRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -158,6 +173,8 @@ class DocumentRead(BaseModel):
     mime_type: str
     size_bytes: int
     sha256: str
+    source_kind: DocumentSourceKind
+    media_metadata: dict[str, object]
     version_number: int
     parent_document_id: str | None
     status: DocumentStatus

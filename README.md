@@ -18,7 +18,7 @@ ClearCut turns a screenplay, shot list, or rough cut into a structured rights-cl
 
 This repository contains a deployed staging vertical slice for the Agentic Cinema hackathon. The Google Cloud and Parallel integrations are connected, and the production-shaped research, review, permission-work, audit, and reporting flows have been exercised end to end.
 
-The latest local changes include real Identity Platform authentication/RBAC foundations, a tabbed project workspace, styled report/PDF rendering fixes, and submission brand assets. Video-analysis ingestion remains intentionally excluded from this batch; deployment is paused until that milestone is complete. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions, [docs/12-batch-release-plan.md](docs/12-batch-release-plan.md) for the release gate, and [docs/13-operations-runbook.md](docs/13-operations-runbook.md) for operating procedures.
+The latest local changes include real Identity Platform authentication/RBAC foundations, a tabbed project workspace, styled report/PDF rendering fixes, submission brand assets, and the first video/audio ingestion path. Media is uploaded to Cloud Storage, analyzed through the existing review-gated job workflow, and represented as timestamped rights signals. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions, [docs/12-batch-release-plan.md](docs/12-batch-release-plan.md) for the release gate, and [docs/13-operations-runbook.md](docs/13-operations-runbook.md) for operating procedures.
 
 ## Primary partner track
 
@@ -27,7 +27,7 @@ The latest local changes include real Identity Platform authentication/RBAC foun
 ## Product flow
 
 ```text
-Script / shot list / rough cut
+Script / shot list / video / audio rough cut
           ↓
 Rights-bearing asset inventory
           ↓
@@ -56,6 +56,7 @@ Clearance report + outreach actions
 - [Deployment infrastructure](infra/README.md)
 - [Batch release plan](docs/12-batch-release-plan.md)
 - [Operations runbook](docs/13-operations-runbook.md)
+- [Video and audio ingestion design](docs/14-video-ingestion.md)
 
 Authentication configuration is documented in [infra/README.md](infra/README.md) and `.env.example`. The API uses Firebase/Identity Platform ID tokens outside local demo mode; never commit Firebase service-account keys or token values.
 

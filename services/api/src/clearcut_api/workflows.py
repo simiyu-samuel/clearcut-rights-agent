@@ -1,10 +1,12 @@
+import asyncio
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from .agent_runtime import AgentRuntimeError, build_clearance_agent
-from .config import Settings
+from .config import Settings, settings
 from .db import Database
 from .extraction import extract_candidate_assets
+from .media_analysis import build_media_analyzer
 from .models import Asset, ClearanceCard, SourceRecord
 from .providers import (
     FixtureParallelProvider,
@@ -258,8 +260,24 @@ def process_document_analysis(
         documents.update_status(document_id, "processing")
         jobs.update_status(job_id, "running")
         try:
-            text = storage.read_text(document.object_key)
-            candidates = extract_candidate_assets(text)
+            if document.source_kind in {"video", "audio"}:
+                media_output = asyncio.run(
+                    build_media_analyzer(settings).analyze(
+                        storage.object_uri(document.object_key),
+                        document.mime_type,
+                        document.original_filename,
+                    )
+                )
+                candidates = media_output.candidates
+                document.extracted_text = media_output.transcript
+                document.media_metadata = {
+                    **media_output.metadata,
+                    "summary": media_output.summary,
+                    "asset_count": len(candidates),
+                }
+            else:
+                text = storage.read_text(document.object_key)
+                candidates = extract_candidate_assets(text)
             created = [
                 Asset(
                     organization_id=organization_id,
@@ -280,7 +298,7 @@ def process_document_analysis(
             assets.create_many(created)
             documents.update_status(document_id, "analyzed")
             jobs.update_status(job_id, "awaiting_review")
-        except (OSError, UnicodeError, ValueError) as exc:
+        except (AgentRuntimeError, OSError, UnicodeError, ValueError, RuntimeError) as exc:
             documents.update_status(document_id, "failed")
             jobs.update_status(job_id, "failed", error_code=f"analysis_failed:{type(exc).__name__}")
 
