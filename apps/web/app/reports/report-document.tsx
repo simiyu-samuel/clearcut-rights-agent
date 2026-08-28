@@ -194,8 +194,7 @@ export function ReportDocument({ projectId, project, report, reports = [report] 
     setBusy(true);
     setMessage("");
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-      const response = await fetch(`${apiUrl}/v1/projects/${projectId}/reports/${currentReport.id}/pdf`, { headers: { "x-organization-id": "demo-org" } });
+      const response = await fetch(`/v1/projects/${projectId}/reports/${currentReport.id}/pdf`);
       if (!response.ok) throw new Error("Unable to download the PDF report.");
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");

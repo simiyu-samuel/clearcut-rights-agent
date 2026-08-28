@@ -11,8 +11,7 @@ export function ReportButton({ projectId }: { projectId: string }) {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    void fetch(`${apiUrl}/v1/projects/${projectId}/reports`, { headers: { "x-organization-id": "demo-org" } })
+    void fetch(`/v1/projects/${projectId}/reports`, { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : []))
       .then((reports: Array<{ id: string }>) => setHasReport(reports.length > 0))
       .catch(() => setHasReport(false));
@@ -22,10 +21,8 @@ export function ReportButton({ projectId }: { projectId: string }) {
     setBusy(true);
     setMessage("");
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-      const response = await fetch(`${apiUrl}/v1/projects/${projectId}/reports`, {
+      const response = await fetch(`/v1/projects/${projectId}/reports`, {
         method: "POST",
-        headers: { "x-organization-id": "demo-org", "x-actor-id": "demo-producer" },
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));

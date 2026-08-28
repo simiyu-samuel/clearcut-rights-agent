@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth-context";
 type WorkspaceShellProps = {
   children: ReactNode;
   breadcrumbs: ReactNode;
-  active?: "projects" | "reports" | "activity" | "settings";
+  active?: "projects" | "review" | "reports" | "activity" | "settings";
   projectId?: string;
 };
 
@@ -30,7 +30,7 @@ export function WorkspaceShell({ children, breadcrumbs, active, projectId }: Wor
         <div className="nav-label">Workspace</div>
         <nav className="nav">
           <Link className={`nav-item ${active === "projects" ? "active" : ""}`} href="/"><span className="nav-icon">⌂</span>Projects</Link>
-          <Link className={`nav-item ${projectId && pathname.includes(`/projects/${projectId}/review`) ? "active" : ""}`} href={(projectId ? `/projects/${projectId}/review` : "/") as Route}><span className="nav-icon">◈</span>Review queue</Link>
+          <Link className={`nav-item ${active === "review" || Boolean(projectId && pathname.includes(`/projects/${projectId}/review`)) ? "active" : ""}`} href={(projectId ? `/projects/${projectId}/review` : "/review") as Route}><span className="nav-icon">◈</span>Review queue</Link>
           <Link className={`nav-item ${active === "reports" ? "active" : ""}`} href="/reports"><span className="nav-icon">↗</span>Reports</Link>
           <Link className={`nav-item ${active === "activity" ? "active" : ""}`} href="/activity"><span className="nav-icon">◌</span>Activity</Link>
           <Link className={`nav-item ${active === "settings" ? "active" : ""}`} href="/settings"><span className="nav-icon">⚙</span>Settings</Link>
@@ -44,7 +44,7 @@ export function WorkspaceShell({ children, breadcrumbs, active, projectId }: Wor
         </div>
       </aside>
       <main className="main">
-        <header className="topbar"><div className="breadcrumbs">{breadcrumbs}</div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />{process.env.NEXT_PUBLIC_AUTH_MODE === "identity_platform" ? "Secure workspace" : "Local demo mode"}</div><button className="icon-button" aria-label="Notifications" type="button">◌</button></div></header>
+        <header className="topbar"><div className="breadcrumbs">{breadcrumbs}</div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />{process.env.NEXT_PUBLIC_AUTH_MODE === "identity_platform" ? "Secure workspace" : "Local demo mode"}</div><Link className="icon-button" aria-label="Open activity and notifications" href="/activity">◌</Link></div></header>
         <div className="content">{children}</div>
       </main>
     </div>
