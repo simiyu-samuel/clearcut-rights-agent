@@ -24,7 +24,11 @@ class ObjectStore(Protocol):
     def object_uri(self, object_key: str) -> str: ...
 
     def create_resumable_upload_session(
-        self, object_key: str, content_type: str, size_bytes: int
+        self,
+        object_key: str,
+        content_type: str,
+        size_bytes: int,
+        origin: str | None = None,
     ) -> str: ...
 
     def get_metadata(self, object_key: str) -> StoredObjectMetadata: ...
@@ -53,7 +57,11 @@ class LocalObjectStore:
         return (self.root / object_key).resolve().as_uri()
 
     def create_resumable_upload_session(
-        self, object_key: str, content_type: str, size_bytes: int
+        self,
+        object_key: str,
+        content_type: str,
+        size_bytes: int,
+        origin: str | None = None,
     ) -> str:
         raise NotImplementedError("resumable_upload_requires_gcs")
 
@@ -90,10 +98,18 @@ class GcsObjectStore:
         return f"gs://{self.bucket.name}/{object_key}"
 
     def create_resumable_upload_session(
-        self, object_key: str, content_type: str, size_bytes: int
+        self,
+        object_key: str,
+        content_type: str,
+        size_bytes: int,
+        origin: str | None = None,
     ) -> str:
         blob = self.bucket.blob(object_key)
-        return blob.create_resumable_upload_session(content_type=content_type, size=size_bytes)
+        return blob.create_resumable_upload_session(
+            content_type=content_type,
+            size=size_bytes,
+            origin=origin,
+        )
 
     def get_metadata(self, object_key: str) -> StoredObjectMetadata:
         blob = self.bucket.blob(object_key)

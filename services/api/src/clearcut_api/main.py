@@ -1052,6 +1052,7 @@ def create_app(
     def initiate_media_upload(
         project_id: str,
         payload: MediaUploadInit,
+        request: Request,
         x_actor_id: str | None = Depends(get_actor_id),
         session: Session = Depends(get_db),
         organization_id: str = Depends(get_organization_id),
@@ -1087,7 +1088,10 @@ def create_app(
         object_key = f"{organization_id}/{project_id}/{document_id}.media"
         try:
             upload_url = object_store.create_resumable_upload_session(
-                object_key, content_type, payload.size_bytes
+                object_key,
+                content_type,
+                payload.size_bytes,
+                origin=request.headers.get("origin"),
             )
         except Exception as exc:
             request_logger.exception("media_upload_session_creation_failed")
