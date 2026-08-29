@@ -109,7 +109,7 @@ This gives us four differentiators:
 
 ### 5.1 Design language
 
-Keep the dark editorial/production aesthetic, but make it more structured and less decorative:
+Use a bright editorial/production aesthetic with strong structure and restrained decoration:
 
 - strong typographic hierarchy;
 - larger, more useful data density;
