@@ -83,27 +83,25 @@ class VertexGeminiClearanceAgent:
         prompt = self._build_prompt(asset, sources)
         try:
             response_text = ""
+            complete_payload_text: str | None = None
             async for event in self._app.async_stream_query(
                 user_id=f"clearcut-asset-{asset.id}",
                 message=prompt,
             ):
                 event_text = self._extract_event_text(event)
-                if event_text:
-                    # ADK may stream partial chunks or emit a complete final event.
-                    # Prefer a complete final event, while still supporting a final
-                    # chunk that only contains the tail of a streamed JSON object.
-                    if self._event_is_final(event):
-                        if self._looks_like_json(event_text) or not response_text:
-                            response_text = event_text
-                        else:
-                            response_text += event_text
-                    elif not response_text:
-                        response_text = event_text
-                    elif self._event_is_partial(event):
-                        response_text += event_text
-                    else:
-                        response_text = event_text
-            payload = self._parse_json(response_text)
+                if not event_text or complete_payload_text is not None:
+                    continue
+                if self._is_complete_payload(event_text):
+                    # A non-partial ADK event can be a cumulative snapshot. Keep
+                    # the complete payload rather than duplicating snapshots.
+                    complete_payload_text = event_text
+                    continue
+                # Other SDK versions emit JSON fragments without setting `partial`.
+                # Accumulate those fragments until the required payload is complete.
+                response_text += event_text
+                if self._is_complete_payload(response_text):
+                    complete_payload_text = response_text
+            payload = self._parse_json(complete_payload_text or response_text)
             output = self._parse_output(payload)
             policy = calculate_risk(asset.category, len(sources), asset.reason_codes)
             return ClearanceAgentOutput(
@@ -132,10 +130,10 @@ class VertexGeminiClearanceAgent:
         """Extract model text from an ADK JSON event without depending on SDK models."""
         if isinstance(event, dict):
             content = event.get("content")
-            direct_text = event.get("text")
+            direct_text = event.get("text") or event.get("output")
         else:
             content = getattr(event, "content", None)
-            direct_text = getattr(event, "text", None)
+            direct_text = getattr(event, "text", None) or getattr(event, "output", None)
         if isinstance(direct_text, str) and direct_text.strip():
             return direct_text.strip()
         if isinstance(content, dict):
@@ -151,6 +149,24 @@ class VertexGeminiClearanceAgent:
             if isinstance(text, str) and text.strip():
                 texts.append(text)
         return "".join(texts).strip()
+
+    @classmethod
+    def _is_complete_payload(cls, text: str) -> bool:
+        try:
+            payload = cls._parse_json(text)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return False
+        return all(
+            field in payload
+            for field in (
+                "summary",
+                "recommendation",
+                "risk_score",
+                "confidence_score",
+                "reason_codes",
+                "needs_human_review",
+            )
+        )
 
     @staticmethod
     def _event_is_final(event: Any) -> bool:

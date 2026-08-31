@@ -122,6 +122,45 @@ def test_vertex_clearance_agent_parses_google_adk_stream_and_enforces_policy() -
     assert output.generated_by == "vertex_adk_gemini"
 
 
+def test_vertex_clearance_agent_accumulates_adk_fragments_without_partial_flags() -> None:
+    class FragmentedAdkApp:
+        async def async_stream_query(self, *, user_id: str, message: str):
+            del user_id, message
+            yield {"content": {"parts": [{"text": '{"summary":"Evidence reviewed",'}]}}
+            yield {
+                "content": {
+                    "parts": [
+                        {
+                            "text": '"recommendation":"Confirm permission","risk_score":5,'
+                            '"confidence_score":0.1,"reason_codes":["model_code"],'
+                            '"needs_human_review":true}',
+                        }
+                    ]
+                }
+            }
+            # A later non-model event must not replace the completed payload.
+            yield {"content": {"parts": [{"function_response": {"name": "calculate_clearance_risk"}}]}}
+
+    asset = Asset(
+        organization_id="demo-org",
+        project_id="project-a",
+        document_id="document-a",
+        canonical_name="Neon Afterglow",
+        category="music",
+        context="A fictional song is audible in scene 04.",
+        extraction_confidence=0.9,
+        reason_codes=["recorded_music_signal"],
+    )
+    agent = VertexGeminiClearanceAgent.__new__(VertexGeminiClearanceAgent)
+    agent._app = FragmentedAdkApp()
+    agent._model_name = "gemini-2.5-flash"
+
+    output = asyncio.run(agent.create_clearance_card(asset, []))
+
+    assert output.summary == "Evidence reviewed"
+    assert output.generated_by == "vertex_adk_gemini"
+
+
 def test_category_playbook_exposes_rights_specific_questions() -> None:
     playbook = playbook_for("music")
 
