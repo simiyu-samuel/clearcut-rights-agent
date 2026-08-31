@@ -1,6 +1,7 @@
 "use client";
 
 import { authorizedFetch as fetch } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth-context";
 import { useEffect, useMemo, useState } from "react";
 
 type ReviewQueueProps = { projectId: string; mode?: "review" | "requests" };
@@ -64,6 +65,7 @@ const decisions = [
 ] as const;
 
 export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
+  const auth = useAuth();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [cards, setCards] = useState<ClearanceCard[]>([]);
   const [sourcesByRun, setSourcesByRun] = useState<Record<string, SourceRecord[]>>({});
@@ -77,15 +79,21 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+  function actorLabel(actorId: string): string {
+    if (actorId === auth.user?.actorId) return auth.user.displayName;
+    if (actorId.startsWith("system")) return "ClearCut";
+    if (actorId.startsWith("demo-")) return "Studio team";
+    return "Workspace member";
+  }
+
   async function loadQueue() {
     setLoading(true);
     setMessage("");
     try {
-      const headers = { "x-organization-id": "demo-org" };
       const [assetsResponse, cardsResponse, approvalsResponse] = await Promise.all([
-        fetch(`${apiUrl}/v1/projects/${projectId}/assets`, { headers }),
-        fetch(`${apiUrl}/v1/projects/${projectId}/clearance-cards`, { headers }),
-        fetch(`${apiUrl}/v1/projects/${projectId}/approvals`, { headers }),
+        fetch(`${apiUrl}/v1/projects/${projectId}/assets`),
+        fetch(`${apiUrl}/v1/projects/${projectId}/clearance-cards`),
+        fetch(`${apiUrl}/v1/projects/${projectId}/approvals`),
       ]);
       if (!assetsResponse.ok || !cardsResponse.ok || !approvalsResponse.ok) {
         throw new Error("The review API is not available yet.");
@@ -95,13 +103,13 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
       const nextApprovals: Approval[] = await approvalsResponse.json();
       const sourceEntries = await Promise.all(
         nextCards.map(async (card) => {
-          const response = await fetch(`${apiUrl}/v1/research-runs/${card.research_run_id}/sources`, { headers });
+          const response = await fetch(`${apiUrl}/v1/research-runs/${card.research_run_id}/sources`);
           return [card.research_run_id, response.ok ? await response.json() : []] as const;
         }),
       );
       const draftEntries = await Promise.all(
         nextAssets.map(async (asset) => {
-          const response = await fetch(apiUrl + "/v1/assets/" + asset.id + "/outreach-drafts", { headers, cache: "no-store" });
+          const response = await fetch(apiUrl + "/v1/assets/" + asset.id + "/outreach-drafts", { cache: "no-store" });
           const drafts = response.ok ? await response.json() as OutreachDraft[] : [];
           return [asset.id, drafts[0]] as const;
         }),
@@ -155,7 +163,7 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
     try {
       const response = await fetch(`${apiUrl}/v1/assets/${card.asset_id}/approvals`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-organization-id": "demo-org", "x-actor-id": "demo-producer" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ decision }),
       });
       if (!response.ok) {
@@ -176,7 +184,7 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
     try {
       const response = await fetch(`${apiUrl}/v1/assets/${card.asset_id}/outreach-drafts`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-organization-id": "demo-org", "x-actor-id": "demo-producer" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ recipient_hint: "Rights and licensing contact" }),
       });
       if (!response.ok) {
@@ -197,7 +205,7 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
     try {
       const response = await fetch(apiUrl + "/v1/outreach-drafts/" + draft.id, {
         method: "PATCH",
-        headers: { "content-type": "application/json", "x-organization-id": "demo-org", "x-actor-id": "demo-producer" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
       if (!response.ok) throw new Error("Unable to update the permission request.");
@@ -216,7 +224,7 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
     try {
       const response = await fetch(`${apiUrl}/v1/assets/${asset.id}/research-runs`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-organization-id": "demo-org" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({
           query: `${asset.canonical_name} ${asset.category} licensing rights holder`,
           objective: `Identify rights holders, licensing requirements, and reliable evidence for clearing "${asset.canonical_name}" for film and television use.`,
@@ -229,14 +237,13 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
       const run = await response.json() as { id: string };
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 1500));
-        const statusResponse = await fetch(`${apiUrl}/v1/research-runs/${run.id}`, { headers: { "x-organization-id": "demo-org" } });
+        const statusResponse = await fetch(`${apiUrl}/v1/research-runs/${run.id}`);
         if (!statusResponse.ok) throw new Error("Unable to read research status.");
         const status = await statusResponse.json() as { status: string; error_code?: string | null };
         if (status.status === "completed" || status.status === "partial") {
           let cardReady = false;
           for (let cardAttempt = 0; cardAttempt < 20; cardAttempt += 1) {
             const cardResponse = await fetch(`${apiUrl}/v1/assets/${asset.id}/clearance-card`, {
-              headers: { "x-organization-id": "demo-org" },
               cache: "no-store",
             });
             if (cardResponse.ok) {
@@ -323,7 +330,7 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
                 <div className="latest-decision">
                   <span>Latest reviewer decision</span>
                   <strong>{latestApproval.decision.replaceAll("_", " ")}</strong>
-                  <small>by {latestApproval.actor_id} · {new Date(latestApproval.created_at).toLocaleString()}</small>
+                  <small>by {actorLabel(latestApproval.actor_id)} · {new Date(latestApproval.created_at).toLocaleString()}</small>
                 </div>
               ) : null}
               {approvals.length > 0 ? (
@@ -334,7 +341,7 @@ export function ReviewQueue({ projectId, mode = "review" }: ReviewQueueProps) {
                       <div className="decision-history-row" key={approval.id}>
                         <div>
                           <strong>{approval.decision.replaceAll("_", " ")}</strong>
-                          <small>{approval.actor_id} · {new Date(approval.created_at).toLocaleString()}</small>
+                          <small>{actorLabel(approval.actor_id)} · {new Date(approval.created_at).toLocaleString()}</small>
                         </div>
                         {approval.note ? <p>{approval.note}</p> : null}
                       </div>

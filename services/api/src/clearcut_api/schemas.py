@@ -75,6 +75,7 @@ class MembershipRead(BaseModel):
 
     id: str
     organization_id: str
+    organization_name: str | None = None
     actor_id: str
     display_name: str
     role: MembershipRole

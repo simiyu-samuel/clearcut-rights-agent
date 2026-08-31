@@ -13,6 +13,7 @@ COPY services/api/pyproject.toml services/api/pyproject.toml
 COPY services/api/src services/api/src
 COPY services/api/alembic.ini services/api/alembic.ini
 COPY services/api/migrations services/api/migrations
+COPY assets/brand/clearcut-logo.png assets/brand/clearcut-logo.png
 
 RUN pip install --upgrade pip \
     && pip install "./services/api[agent]"

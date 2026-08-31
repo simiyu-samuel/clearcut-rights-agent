@@ -34,13 +34,17 @@ function Icon({ name, filled = false }: { name: IconName; filled?: boolean }) {
 export function WorkspaceShell({ children, breadcrumbs, active, projectId }: WorkspaceShellProps) {
   const pathname = usePathname();
   const auth = useAuth();
+  const currentMembership = auth.memberships.find(
+    (membership) => membership.organization_id === auth.organizationId,
+  );
   const initials = (auth.user?.displayName ?? "ClearCut")
     .split(/\s+/)
     .map((part) => part[0])
     .join("")
     .slice(0, 2)
     .toUpperCase();
-  const workspaceName = auth.organizationId === "demo-org" ? "Studio Meridian" : auth.organizationId ?? "Workspace";
+  const workspaceName = currentMembership?.organization_name
+    ?? (auth.organizationId === "demo-org" ? "Studio Meridian" : "Workspace");
   const projectReviewActive = Boolean(projectId && pathname.includes(`/projects/${projectId}/review`));
   const navItems: Array<{ key: NonNullable<WorkspaceShellProps["active"]>; label: string; href: Route; icon: IconName }> = [
     { key: "overview", label: "Overview", href: "/" as Route, icon: "dashboard" },
@@ -68,7 +72,7 @@ export function WorkspaceShell({ children, breadcrumbs, active, projectId }: Wor
           </nav>
           <div className="workspace-account">
             <div className="account"><div className="avatar">{initials}</div><div><div className="account-name">{auth.user?.displayName ?? "ClearCut user"}</div><div className="account-role">{auth.organizationRole ?? "Workspace member"}</div></div></div>
-            {auth.memberships.length > 1 ? <select aria-label="Select organization" className="workspace-org-select" value={auth.organizationId ?? ""} onChange={(event) => auth.selectOrganization(event.target.value)}>{auth.memberships.map((membership) => <option key={membership.organization_id} value={membership.organization_id}>{membership.organization_id}</option>)}</select> : null}
+            {auth.memberships.length > 1 ? <select aria-label="Select organization" className="workspace-org-select" value={auth.organizationId ?? ""} onChange={(event) => auth.selectOrganization(event.target.value)}>{auth.memberships.map((membership) => <option key={membership.organization_id} value={membership.organization_id}>{membership.organization_name ?? membership.organization_id}</option>)}</select> : null}
             <button className="workspace-signout" onClick={() => void auth.signOut()} type="button">Sign out</button>
           </div>
         </div>

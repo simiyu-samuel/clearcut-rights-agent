@@ -1,6 +1,7 @@
 "use client";
 
 import { authorizedFetch as fetch } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth-context";
 import { useEffect, useMemo, useState } from "react";
 
 type OperationsPanelProps = { projectId: string };
@@ -19,8 +20,6 @@ type Recheck = { id: string; asset_id: string; cadence_days: number; next_run_at
 type Member = { actor_id: string; display_name: string; role: string; status: string };
 type Activity = { id: string; action: string; actor_id: string; resource_type: string; created_at: string; metadata_json: string | null };
 
-const headers = { "x-organization-id": "demo-org" };
-
 function label(value: string) {
   return value.replaceAll("_", " ");
 }
@@ -30,6 +29,7 @@ function dateLabel(value: string) {
 }
 
 export function OperationsPanel({ projectId }: OperationsPanelProps) {
+  const auth = useAuth();
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [rechecks, setRechecks] = useState<Recheck[]>([]);
@@ -40,15 +40,22 @@ export function OperationsPanel({ projectId }: OperationsPanelProps) {
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+  function actorLabel(actorId: string): string {
+    if (actorId === auth.user?.actorId) return auth.user.displayName;
+    if (actorId.startsWith("system")) return "ClearCut";
+    if (actorId.startsWith("demo-")) return "Studio team";
+    return "Workspace member";
+  }
+
   async function load() {
     setLoading(true);
     try {
       const [readinessResponse, assetsResponse, rechecksResponse, membersResponse, activityResponse] = await Promise.all([
-        fetch(`${apiUrl}/v1/projects/${projectId}/delivery-readiness`, { headers, cache: "no-store" }),
-        fetch(`${apiUrl}/v1/projects/${projectId}/assets`, { headers, cache: "no-store" }),
-        fetch(`${apiUrl}/v1/projects/${projectId}/research-rechecks`, { headers, cache: "no-store" }),
-        fetch(`${apiUrl}/v1/organizations/current/members`, { headers, cache: "no-store" }),
-        fetch(`${apiUrl}/v1/projects/${projectId}/activity`, { headers, cache: "no-store" }),
+        fetch(`${apiUrl}/v1/projects/${projectId}/delivery-readiness`, { cache: "no-store" }),
+        fetch(`${apiUrl}/v1/projects/${projectId}/assets`, { cache: "no-store" }),
+        fetch(`${apiUrl}/v1/projects/${projectId}/research-rechecks`, { cache: "no-store" }),
+        fetch(`${apiUrl}/v1/organizations/current/members`, { cache: "no-store" }),
+        fetch(`${apiUrl}/v1/projects/${projectId}/activity`, { cache: "no-store" }),
       ]);
       if (!readinessResponse.ok || !assetsResponse.ok || !rechecksResponse.ok || !membersResponse.ok || !activityResponse.ok) {
         throw new Error("Operations data is not available yet.");
@@ -101,7 +108,7 @@ export function OperationsPanel({ projectId }: OperationsPanelProps) {
       <div className="operations-grid">
         <div className="operations-section"><div className="operations-section-heading"><span>Team coverage</span><small>{members.length} members</small></div>{members.map((member) => <div className="member-row" key={member.actor_id}><span className="avatar small">{member.display_name.slice(0, 2).toUpperCase()}</span><div><strong>{member.display_name}</strong><small>{label(member.role)} · {member.status}</small></div></div>)}</div>
         <div className="operations-section"><div className="operations-section-heading"><span>Evidence maintenance</span><small>{rechecks.length} schedules</small></div>{rechecks.length ? rechecks.map((recheck) => <div className="recheck-row" key={recheck.id}><div><strong>{assetNames.get(recheck.asset_id) ?? "Asset"}</strong><small>Every {recheck.cadence_days} days · next {dateLabel(recheck.next_run_at)}</small></div><span className={recheck.active ? "schedule-active" : "schedule-paused"}>{recheck.active ? "Active" : "Paused"}</span></div>) : <p className="operations-empty">No scheduled evidence rechecks. Add one from an asset detail view.</p>}</div>
-        <div className="operations-section activity-section"><div className="operations-section-heading"><span>Recent activity</span><small>{activity.length} events</small></div>{activity.slice(0, 6).map((event) => <div className="activity-row" key={event.id}><span className="activity-dot" /><div><strong>{label(event.action)}</strong><small>{event.actor_id} · {dateLabel(event.created_at)}</small></div></div>)}{!activity.length ? <p className="operations-empty">No activity has been recorded for this project yet.</p> : null}</div>
+        <div className="operations-section activity-section"><div className="operations-section-heading"><span>Recent activity</span><small>{activity.length} events</small></div>{activity.slice(0, 6).map((event) => <div className="activity-row" key={event.id}><span className="activity-dot" /><div><strong>{label(event.action)}</strong><small>{actorLabel(event.actor_id)} · {dateLabel(event.created_at)}</small></div></div>)}{!activity.length ? <p className="operations-empty">No activity has been recorded for this project yet.</p> : null}</div>
       </div>
     </section>
   );

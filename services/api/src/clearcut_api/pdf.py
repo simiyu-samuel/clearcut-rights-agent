@@ -1,7 +1,10 @@
 import re
+import struct
 import textwrap
 import unicodedata
+import zlib
 from dataclasses import dataclass, field
+from pathlib import Path
 
 PAGE_WIDTH = 612
 PAGE_HEIGHT = 792
@@ -255,9 +258,124 @@ def _color(red: int, green: int, blue: int) -> str:
     return f"{red / 255:.3f} {green / 255:.3f} {blue / 255:.3f}"
 
 
+@dataclass(frozen=True)
+class _PngImage:
+    width: int
+    height: int
+    rgb: bytes
+    alpha: bytes | None
+
+
+def _load_brand_logo() -> _PngImage | None:
+    """Load the current ClearCut logo without adding a PDF/image dependency."""
+    path = Path(__file__).resolve().parents[4] / "assets" / "brand" / "clearcut-logo.png"
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        return None
+    if payload[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+
+    width = height = bit_depth = color_type = interlace = None
+    image_data = bytearray()
+    offset = 8
+    while offset + 12 <= len(payload):
+        length = struct.unpack(">I", payload[offset : offset + 4])[0]
+        chunk_type = payload[offset + 4 : offset + 8]
+        chunk = payload[offset + 8 : offset + 8 + length]
+        offset += 12 + length
+        if chunk_type == b"IHDR" and len(chunk) == 13:
+            width, height, bit_depth, color_type, _, _, interlace = struct.unpack(
+                ">IIBBBBB", chunk
+            )
+        elif chunk_type == b"IDAT":
+            image_data.extend(chunk)
+        elif chunk_type == b"IEND":
+            break
+
+    if (
+        width is None
+        or height is None
+        or bit_depth != 8
+        or color_type not in {2, 6}
+        or interlace != 0
+    ):
+        return None
+
+    channels = 4 if color_type == 6 else 3
+    row_length = width * channels
+    try:
+        decoded = zlib.decompress(bytes(image_data))
+    except zlib.error:
+        return None
+    if len(decoded) < height * (row_length + 1):
+        return None
+
+    rows: list[bytes] = []
+    previous = bytearray(row_length)
+    cursor = 0
+    for _ in range(height):
+        filter_type = decoded[cursor]
+        cursor += 1
+        row = bytearray(decoded[cursor : cursor + row_length])
+        cursor += row_length
+        for index in range(row_length):
+            left = row[index - channels] if index >= channels else 0
+            up = previous[index]
+            up_left = previous[index - channels] if index >= channels else 0
+            if filter_type == 1:
+                row[index] = (row[index] + left) & 255
+            elif filter_type == 2:
+                row[index] = (row[index] + up) & 255
+            elif filter_type == 3:
+                row[index] = (row[index] + ((left + up) // 2)) & 255
+            elif filter_type == 4:
+                estimate = left + up - up_left
+                distances = (abs(estimate - left), abs(estimate - up), abs(estimate - up_left))
+                predictor = (left, up, up_left)[distances.index(min(distances))]
+                row[index] = (row[index] + predictor) & 255
+            elif filter_type != 0:
+                return None
+        rows.append(bytes(row))
+        previous = row
+
+    rgb = bytearray()
+    alpha = bytearray()
+    for row in rows:
+        for index in range(0, row_length, channels):
+            rgb.extend(row[index : index + 3])
+            alpha.append(row[index + 3] if channels == 4 else 255)
+    if not any(alpha):
+        return None
+
+    visible = [index for index, value in enumerate(alpha) if value]
+    min_x = min(index % width for index in visible)
+    max_x = max(index % width for index in visible)
+    min_y = min(index // width for index in visible)
+    max_y = max(index // width for index in visible)
+    cropped_width = max_x - min_x + 1
+    cropped_height = max_y - min_y + 1
+    cropped_rgb = bytearray()
+    cropped_alpha = bytearray()
+    for y in range(min_y, max_y + 1):
+        start = (y * width + min_x) * 3
+        end = (y * width + max_x + 1) * 3
+        cropped_rgb.extend(rgb[start:end])
+        alpha_start = y * width + min_x
+        alpha_end = y * width + max_x + 1
+        cropped_alpha.extend(alpha[alpha_start:alpha_end])
+    return _PngImage(
+        width=cropped_width,
+        height=cropped_height,
+        rgb=bytes(cropped_rgb),
+        alpha=bytes(cropped_alpha) if any(value < 255 for value in cropped_alpha) else None,
+    )
+
+
 class _PdfBuilder:
     def __init__(self, report: ParsedReport):
         self.report = report
+        self.logo = _load_brand_logo()
         self.pages: list[list[str]] = []
         self.y = 0
         self.new_page(cover=True)
@@ -289,7 +407,11 @@ class _PdfBuilder:
                     f"{MARGIN} {PAGE_HEIGHT - 58} m {PAGE_WIDTH - MARGIN} {PAGE_HEIGHT - 58} l S",
                 ]
             )
-            self.text("CLEARCUT / RIGHTS INTELLIGENCE", MARGIN, PAGE_HEIGHT - 50, 8, bold=True, color=_color(105, 100, 94))
+            if self.logo:
+                self.image(MARGIN, PAGE_HEIGHT - 55, 72, 18)
+                self.text("RIGHTS INTELLIGENCE", MARGIN + 84, PAGE_HEIGHT - 50, 8, bold=True, color=_color(105, 100, 94))
+            else:
+                self.text("CLEARCUT / RIGHTS INTELLIGENCE", MARGIN, PAGE_HEIGHT - 50, 8, bold=True, color=_color(105, 100, 94))
             self.y = PAGE_HEIGHT - 86
 
     def ensure(self, height: int = 18) -> None:
@@ -313,6 +435,15 @@ class _PdfBuilder:
         self.commands.append(f"{color} {'RG' if stroke else 'rg'}")
         self.commands.append(f"{x} {y} {width} {height} re {'S' if stroke else 'f'}")
 
+    def image(self, x: int, y: int, width: int, height: int) -> None:
+        if self.logo:
+            self.commands.extend([
+                "q",
+                f"{width} 0 0 {height} {x} {y} cm",
+                "/ClearCutLogo Do",
+                "Q",
+            ])
+
     def wrapped(self, value: str, *, x: int = MARGIN, size: int = 10, leading: int = 14, width: int = 88, color: str = "0 0 0", bold: bool = False) -> None:
         for line in textwrap.wrap(_ascii(value), width=width, break_long_words=False, break_on_hyphens=False) or [""]:
             self.ensure(leading)
@@ -328,11 +459,15 @@ class _PdfBuilder:
         self.y -= 28
 
     def cover(self) -> None:
-        self.text("C", MARGIN, self.y, 18, bold=True, color=_color(25, 20, 10))
-        self.rect(MARGIN - 3, self.y - 7, 25, 25, _color(228, 184, 106))
-        self.text("C", MARGIN + 4, self.y, 14, bold=True, color=_color(25, 20, 10))
-        self.text("CLEARCUT", MARGIN + 34, self.y + 4, 14, bold=True, color=_color(246, 241, 232))
-        self.text("RIGHTS INTELLIGENCE", MARGIN + 34, self.y - 9, 7, color=_color(155, 154, 157))
+        if self.logo:
+            self.rect(MARGIN - 8, self.y - 20, 252, 62, _color(250, 248, 244))
+            self.image(MARGIN, self.y - 13, 236, 49)
+        else:
+            self.text("C", MARGIN, self.y, 18, bold=True, color=_color(25, 20, 10))
+            self.rect(MARGIN - 3, self.y - 7, 25, 25, _color(228, 184, 106))
+            self.text("C", MARGIN + 4, self.y, 14, bold=True, color=_color(25, 20, 10))
+            self.text("CLEARCUT", MARGIN + 34, self.y + 4, 14, bold=True, color=_color(246, 241, 232))
+            self.text("RIGHTS INTELLIGENCE", MARGIN + 34, self.y - 9, 7, color=_color(155, 154, 157))
         self.y -= 130
         self.text("EVIDENCE-BACKED CLEARANCE REPORT", MARGIN, self.y, 9, bold=True, color=_color(228, 184, 106))
         self.y -= 29
@@ -514,11 +649,43 @@ class _PdfBuilder:
         for page in self.pages:
             if page is not self.pages[0]:
                 page.extend([])
-        return _serialize(self.pages)
+        return _serialize(self.pages, self.logo)
 
 
-def _serialize(pages: list[list[str]]) -> bytes:
+def _serialize(pages: list[list[str]], logo: _PngImage | None = None) -> bytes:
     objects: list[bytes] = [b"<< /Type /Catalog /Pages 2 0 R >>", b"", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"]
+    logo_ref: int | None = None
+    if logo:
+        alpha_ref: int | None = None
+        if logo.alpha:
+            compressed_alpha = zlib.compress(logo.alpha)
+            alpha_ref = len(objects) + 1
+            objects.append(
+                b"<< /Type /XObject /Subtype /Image /Width "
+                + str(logo.width).encode()
+                + b" /Height "
+                + str(logo.height).encode()
+                + b" /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length "
+                + str(len(compressed_alpha)).encode()
+                + b" >>\nstream\n"
+                + compressed_alpha
+                + b"\nendstream"
+            )
+        compressed_rgb = zlib.compress(logo.rgb)
+        logo_ref = len(objects) + 1
+        smask = b" /SMask " + str(alpha_ref).encode() + b" 0 R" if alpha_ref else b""
+        objects.append(
+            b"<< /Type /XObject /Subtype /Image /Width "
+            + str(logo.width).encode()
+            + b" /Height "
+            + str(logo.height).encode()
+            + b" /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length "
+            + str(len(compressed_rgb)).encode()
+            + smask
+            + b" >>\nstream\n"
+            + compressed_rgb
+            + b"\nendstream"
+        )
     page_refs: list[int] = []
     for page_number, commands in enumerate(pages, start=1):
         if page_number > 1:
@@ -541,7 +708,8 @@ def _serialize(pages: list[list[str]]) -> bytes:
         content_number = len(objects) + 1
         objects.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream")
         page_number_ref = len(objects) + 1
-        objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents " + str(content_number).encode() + b" 0 R >>")
+        xobject = b" /XObject << /ClearCutLogo " + str(logo_ref).encode() + b" 0 R >>" if logo_ref else b""
+        objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >>" + xobject + b" >> /Contents " + str(content_number).encode() + b" 0 R >>")
         page_refs.append(page_number_ref)
     kids = b"[" + b" ".join(str(ref).encode() + b" 0 R" for ref in page_refs) + b"]"
     objects[1] = b"<< /Type /Pages /Kids " + kids + b" /Count " + str(len(page_refs)).encode() + b" >>"

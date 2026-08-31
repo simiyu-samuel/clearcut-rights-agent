@@ -540,13 +540,39 @@ def create_app(
                     updated_at=now,
                 )
             ]
+        organizations = {
+            membership.organization_id: OrganizationRepository(session).get(membership.organization_id)
+            for membership in memberships
+        }
+        membership_reads = [
+            {
+                "id": membership.id,
+                "organization_id": membership.organization_id,
+                "organization_name": (
+                    organizations[membership.organization_id].name
+                    if organizations.get(membership.organization_id) is not None
+                    else (
+                        "Studio Meridian"
+                        if membership.organization_id == settings.default_organization_id
+                        else membership.organization_id
+                    )
+                ),
+                "actor_id": membership.actor_id,
+                "display_name": membership.display_name,
+                "role": membership.role,
+                "status": membership.status,
+                "created_at": membership.created_at,
+                "updated_at": membership.updated_at,
+            }
+            for membership in memberships
+        ]
         return {
             "identity": AuthIdentityRead(
                 actor_id=identity.actor_id,
                 email=identity.email,
                 display_name=identity.display_name,
             ),
-            "memberships": memberships,
+            "memberships": membership_reads,
         }
 
     @app.post(

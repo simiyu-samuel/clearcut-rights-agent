@@ -21,6 +21,7 @@ export type Membership = {
   display_name: string;
   role: string;
   status: string;
+  organization_name?: string | null;
 };
 
 type AuthMeResponse = {
@@ -51,6 +52,27 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const organizationStorageKey = "clearcut.organization_id";
+
+function isOpaqueIdentity(value: string | null | undefined, actorId: string): boolean {
+  const normalized = value?.trim();
+  return !normalized || normalized === actorId || /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(normalized);
+}
+
+function emailDisplayName(email: string | null | undefined): string | null {
+  const localPart = email?.split("@", 1)[0]?.replace(/[._-]+/g, " ").replace(/\d+$/g, "").trim();
+  if (!localPart) return null;
+  return localPart.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function resolveDisplayName(firebaseUser: User, payload: AuthMeResponse): string {
+  const candidates = [
+    firebaseUser.displayName,
+    payload.memberships.find((membership) => membership.actor_id === payload.identity.actor_id)?.display_name,
+    payload.identity.display_name,
+  ];
+  const usable = candidates.find((candidate) => !isOpaqueIdentity(candidate, payload.identity.actor_id));
+  return usable?.trim() || emailDisplayName(firebaseUser.email || payload.identity.email) || "ClearCut user";
+}
 
 function demoSnapshot(): Pick<AuthContextValue, "user" | "memberships" | "organizationId"> {
   return {
@@ -124,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser({
             actorId: payload.identity.actor_id,
             email: payload.identity.email,
-            displayName: firebaseUser.displayName || payload.identity.display_name,
+            displayName: resolveDisplayName(firebaseUser, payload),
           });
           setMemberships(payload.memberships);
           setOrganizationId(selected);

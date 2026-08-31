@@ -5,7 +5,7 @@ import type { Route } from "next";
 import { usePathname } from "next/navigation";
 
 const tabs = [
-  ["Overview", ""],
+  ["Command center", ""],
   ["Source", "/source"],
   ["Inventory", "/inventory"],
   ["Research", "/research"],
