@@ -2,8 +2,14 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+import pytest
+
 import clearcut_api.workflows as workflows
-from clearcut_api.agent_runtime import FixtureClearanceAgent, VertexGeminiClearanceAgent
+from clearcut_api.agent_runtime import (
+    AgentRuntimeError,
+    FixtureClearanceAgent,
+    VertexGeminiClearanceAgent,
+)
 from clearcut_api.agent_tools import (
     REGISTERED_AGENT_TOOLS,
     calculate_clearance_risk,
@@ -161,6 +167,32 @@ def test_vertex_clearance_agent_accumulates_adk_fragments_without_partial_flags(
 
     assert output.summary == "Evidence reviewed"
     assert output.generated_by == "vertex_adk_gemini"
+
+
+def test_vertex_clearance_agent_classifies_empty_adk_output() -> None:
+    class EmptyAdkApp:
+        async def async_stream_query(self, *, user_id: str, message: str):
+            del user_id, message
+            yield {"author": "clearcut_clearance_agent", "content": {"parts": []}}
+
+    asset = Asset(
+        organization_id="demo-org",
+        project_id="project-a",
+        document_id="document-a",
+        canonical_name="Neon Afterglow",
+        category="music",
+        context="A fictional song is audible in scene 04.",
+        extraction_confidence=0.9,
+        reason_codes=["recorded_music_signal"],
+    )
+    agent = VertexGeminiClearanceAgent.__new__(VertexGeminiClearanceAgent)
+    agent._app = EmptyAdkApp()
+    agent._model_name = "gemini-2.5-flash"
+
+    with pytest.raises(AgentRuntimeError, match="no usable text") as error:
+        asyncio.run(agent.create_clearance_card(asset, []))
+
+    assert error.value.code == "gemini_empty_output"
 
 
 def test_category_playbook_exposes_rights_specific_questions() -> None:

@@ -3,6 +3,26 @@ import os
 from .agent_tools import CLEARANCE_AGENT_TOOLS, REGISTERED_AGENT_TOOLS
 from .config import Settings, settings
 
+CLEARANCE_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "summary": {"type": "STRING"},
+        "recommendation": {"type": "STRING"},
+        "risk_score": {"type": "INTEGER"},
+        "confidence_score": {"type": "NUMBER"},
+        "reason_codes": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "needs_human_review": {"type": "BOOLEAN"},
+    },
+    "required": [
+        "summary",
+        "recommendation",
+        "risk_score",
+        "confidence_score",
+        "reason_codes",
+        "needs_human_review",
+    ],
+}
+
 
 def _configure_vertex_environment(runtime_settings: Settings) -> None:
     """Configure ADK's Google Gen AI client for Vertex AI before app creation."""
@@ -71,6 +91,7 @@ def build_clearance_agent(agent_settings: Settings | None = None):
             "legal conclusion."
         ),
         tools=CLEARANCE_AGENT_TOOLS,
+        output_schema=CLEARANCE_RESPONSE_SCHEMA,
         generate_content_config=GenerateContentConfig(
             response_mime_type="application/json",
             temperature=0,

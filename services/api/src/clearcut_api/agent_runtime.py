@@ -84,13 +84,17 @@ class VertexGeminiClearanceAgent:
         try:
             response_text = ""
             complete_payload_text: str | None = None
+            event_count = 0
+            text_event_count = 0
             async for event in self._app.async_stream_query(
                 user_id=f"clearcut-asset-{asset.id}",
                 message=prompt,
             ):
+                event_count += 1
                 event_text = self._extract_event_text(event)
                 if not event_text or complete_payload_text is not None:
                     continue
+                text_event_count += 1
                 if self._is_complete_payload(event_text):
                     # A non-partial ADK event can be a cumulative snapshot. Keep
                     # the complete payload rather than duplicating snapshots.
@@ -101,6 +105,12 @@ class VertexGeminiClearanceAgent:
                 response_text += event_text
                 if self._is_complete_payload(response_text):
                     complete_payload_text = response_text
+            if not (complete_payload_text or response_text.strip()):
+                raise AgentRuntimeError(
+                    "gemini_empty_output",
+                    f"Gemini emitted no usable text in {event_count} ADK event(s) "
+                    f"({text_event_count} text event(s))",
+                )
             payload = self._parse_json(complete_payload_text or response_text)
             output = self._parse_output(payload)
             policy = calculate_risk(asset.category, len(sources), asset.reason_codes)
