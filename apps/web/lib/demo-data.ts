@@ -28,7 +28,7 @@ export const demoProjects: Project[] = [
 ];
 
 export const demoAssets: DemoAsset[] = [
-  { number: "01", name: "Song reference: Midnight City", category: "Music", context: "Scene 04 · page 12 · dialogue cue", risk: "high" },
+  { number: "01", name: "Song reference: Neon Afterglow", category: "Music", context: "Scene 04 · page 12 · dialogue cue", risk: "high" },
   { number: "02", name: "Harbor Light Café", category: "Brand / logo", context: "Scene 06 · background signage", risk: "medium" },
   { number: "03", name: "Old Railway Station", category: "Location", context: "Scenes 02, 07 · exterior location", risk: "medium" },
   { number: "04", name: "The Blue Hour photograph", category: "Artwork", context: "Scene 09 · wall dressing", risk: "low" },

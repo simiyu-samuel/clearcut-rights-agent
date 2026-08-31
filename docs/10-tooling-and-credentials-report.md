@@ -1,7 +1,7 @@
 # ClearCut Tooling, Accounts & Credential Readiness Report
 
-**Date:** 2026-08-22  
-**Status:** Google Cloud and Parallel credentials configured; staging deployment packaging is ready
+**Date:** 2026-08-31
+**Status:** Google Cloud, Parallel, Firebase, and hosted staging integrations are configured and exercised
 
 ## Executive answer
 
@@ -18,10 +18,10 @@ Clearance workflow + typed tools
         ↓
 Parallel Search / Extract
         ↓
-Gemini on Vertex AI, with human approval as the safety boundary
+        Google ADK Agent + Vertex ADK runtime with human approval as the safety boundary
 ```
 
-The current repository already has a working fixture-mode vertical slice. It can upload a screenplay, extract candidate rights-bearing assets, run fixture research, create an evidence-backed clearance card, show citations, and record a human approval. Google Cloud project `clearcut-rights-dev` and the Parallel API key are now configured for staging without committing credentials. Fixture mode remains the local default so development and judging do not depend on live services.
+The current repository has a hosted staging vertical slice. It can upload scripts and media, extract candidate rights-bearing assets, call live Parallel research, generate evidence-backed clearance cards with Gemini through Google ADK, show citations, and record a human approval. Google Cloud project `clearcut-rights-dev`, Parallel, and Firebase/Identity Platform are configured for staging without committing credentials. Fixture mode remains the local default so development and deterministic tests do not depend on live services.
 
 ### Current setup checkpoint
 
@@ -46,23 +46,16 @@ The current repository already has a working fixture-mode vertical slice. It can
 | Script intake | UTF-8 Markdown/plain-text upload | Implemented | Upload and analysis endpoints |
 | Asset extraction | Deterministic scene-aware extractor | Implemented | `services/api/src/clearcut_api/extraction.py` |
 | Partner research | Typed Parallel adapter | Implemented; fixture by default | `services/api/src/clearcut_api/providers/parallel_api.py` |
-| Gemini reasoning | Google Gen AI SDK Vertex path | Implemented as optional runtime path | `services/api/src/clearcut_api/agent_runtime.py` |
-| ADK / Agent Builder path | Registered root-agent tools + Agent Engine wrapper | Scaffolded, not deployed | `services/api/src/clearcut_api/adk_agent.py`, `agent_tools.py` |
+| Gemini reasoning | Vertex Gemini through Google ADK | Implemented in hosted runtime | `services/api/src/clearcut_api/agent_runtime.py`, `adk_agent.py` |
+| ADK / Agent Builder path | ADK `Agent` + Vertex `AdkApp` | Active in hosted clearance workflow | `services/api/src/clearcut_api/adk_agent.py`, `agent_tools.py` |
 | Review safety | Clearance cards, approval decisions, audit events | Implemented | `models.py`, `main.py`, review queue UI |
-| Cloud deployment | Cloud Run / Agent Engine | Container packaging implemented; Cloud Run not deployed yet | Next infrastructure milestone |
+| Cloud deployment | Cloud Run, Cloud SQL, Cloud Storage, Secret Manager | Implemented and exercised in staging | `infra/`, deployment runbook |
 
 ## 2. How this maps to the supplied phase brief
 
 ### Phase 1 — Core frameworks and environment
 
-We selected the custom developer SDK route, not the low-code route. The current `VertexGeminiClearanceAgent` uses `google-genai` with Vertex AI configuration, while the ADK file provides the hosted-agent entry point. Google’s current Agent Engine setup documentation separates the Agent Engine and ADK dependencies from the basic Gemini SDK, so we will add the deployment SDK when we implement hosted deployment. See the [Vertex AI Agent Engine setup guide](https://cloud.google.com/agent-builder/agent-engine/set-up), [Gemini API quickstart](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/quickstart), and [ADK runtime quickstart](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime/quickstart-adk).
-
-What is not done yet:
-
-- no Cloud Run service or Agent Engine resource has been deployed yet;
-- no live Gemini request has been run from this repository;
-- registered ADK tools exist, but they are not yet deployed or connected to a hosted Agent Engine runtime;
-- no Agent Engine resource has been deployed.
+We use the Google ADK developer path: the API creates an ADK `Agent`, wraps it in Vertex `AdkApp`, and streams the structured clearance-card response from the hosted Cloud Run service. This satisfies the Google agent runtime requirement without requiring a separately managed Agent Engine resource for the hackathon deployment. Media analysis continues to use the Google Gen AI SDK directly on Vertex because it passes video/audio parts to Gemini. See the [Vertex AI Agent Engine setup guide](https://cloud.google.com/agent-builder/agent-engine/set-up), [Gemini API quickstart](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/quickstart), and [ADK runtime quickstart](https://docs.cloud.google.com/gemini-enterprise-agent-platform/build/runtime/quickstart-adk).
 
 ### Phase 2 — Action mechanisms and data connectivity
 
@@ -87,44 +80,45 @@ We should only add these if ClearCut expands from screenplay rights review into 
 
 ### Phase 3 — Partner integration and infrastructure
 
-Parallel is the selected and implemented partner track. The live adapter calls the documented `/v1/search` and `/v1/extract` endpoints with the server-side `x-api-key` header. The current workflow uses Search; Extract is implemented as an adapter and will be wired into the multi-step research workflow next. See the [Parallel Search quickstart](https://docs.parallel.ai/search/search-quickstart) and [Search API reference](https://docs.parallel.ai/api-reference/search/search).
+Parallel is the selected and implemented partner track. The live adapter calls the documented `/v1/search` and `/v1/extract` endpoints with the server-side `x-api-key` header. The research workflow uses Search to discover leads and Extract to normalize selected sources into persisted evidence. See the [Parallel Search quickstart](https://docs.parallel.ai/search/search-quickstart) and [Search API reference](https://docs.parallel.ai/api-reference/search/search).
 
 We are not currently using IBM, Grafana Labs, ClickHouse, or Replit. They are optional hackathon resources, not dependencies of the ClearCut product decision. Replit is only relevant if we choose it as a hosting/development platform; our planned runtime is Google Cloud.
 
 ### Phase 4 — Reasoning, state, and logic hosting
 
-We have the beginnings of this phase:
+This phase is implemented for the hosted vertical slice:
 
 - workflow state is persisted in SQLAlchemy models;
 - research runs and source records are persisted;
 - clearance cards require human review;
 - approval decisions are append-only and auditable;
-- fixture mode makes the workflow deterministic.
+- fixture mode makes the workflow deterministic;
+- the live clearance-card path uses ADK `Agent` + `AdkApp` and a deterministic risk tool;
+- the authenticated workflow owns persistence, Parallel research, and human approval.
 
-Still required for the full phase:
+Remaining production hardening, outside the hackathon proof, includes:
 
 - persistence-aware multi-step orchestration around the registered tools;
 - an evidence-save tool that writes through the authenticated application workflow;
-- `AdkApp` packaging and Agent Engine deployment;
 - retryable Cloud Tasks or equivalent worker execution;
-- production PostgreSQL and object storage;
 - evaluation fixtures for unsupported certainty, source conflict, and prompt injection.
 
-The supplied brief recommends installing `google-cloud-aiplatform[agent_engines,adk]`. The current repository keeps `google-adk` and `google-genai` in an optional local agent extra so the fixture-mode API stays lightweight. Before hosted deployment, we will align the deployment environment with Google’s current Agent Engine SDK guidance rather than treating the local scaffold as deployed infrastructure.
+The supplied brief recommends installing `google-cloud-aiplatform[agent_engines,adk]`. The repository installs that optional agent extra in the production API image; fixture mode remains the lightweight local default.
 
 ### Phase 5 — Deployment and safety
 
 The safety design is already reflected in the product: research output is evidence, risk is triage, and a human must approve the next action. We also validate Gemini output and reject unsupported claims such as “legally cleared.”
 
-Not yet implemented:
+Implemented for staging:
 
-- Cloud Run deployment;
-- Secret Manager retrieval;
-- Cloud Logging/Trace dashboards and alerting;
-- Cloud Storage for source documents;
+- Cloud Run deployment for the web, API, and migration job;
+- Secret Manager references for the database password and Parallel API key;
+- Cloud Storage for source documents and media;
 - Cloud SQL PostgreSQL migrations;
-- production identity/RBAC;
-- managed safety settings and deployment-level policy configuration.
+- Firebase/Identity Platform authentication and tenant-scoped RBAC;
+- CORS, correlation IDs, health/readiness endpoints, and human-review safety controls.
+
+Still required before a real production launch: centralized alerting dashboards, durable worker retries/dead letters, rate limits, backup-restore drills, retention policies, and deployment-level policy configuration.
 
 ## 3. Accounts and credentials to prepare
 
@@ -244,9 +238,8 @@ The last two values remain local-development defaults. For staging/production th
 2. Provision Cloud Storage and Cloud SQL PostgreSQL.
 3. Add migrations and the managed object-store adapter.
 4. Deploy the API and web services to Cloud Run with the existing runtime identity and Secret Manager reference.
-5. Connect the registered ClearCut ADK tools to the hosted Agent Engine path.
-6. Run a live Gemini + Parallel smoke test while retaining fixture fallback.
-7. Deploy the production-shaped demo and exercise the approval/audit path.
+5. Run a live ADK/Gemini + Parallel smoke test while retaining fixture fallback.
+6. Deploy the production-shaped demo and exercise the approval/audit path.
 
 ## 6. What you should send back
 
@@ -266,4 +259,4 @@ Do not send:
 - OAuth refresh tokens;
 - Secret Manager values.
 
-Once the project ID, region, and credential readiness are confirmed, we can make the live integrations active and move into Agent Engine deployment.
+The live integrations are active in staging. A separately managed Agent Engine resource is optional for a later scale-out; the hackathon deployment uses the supported ADK-on-Cloud-Run path.

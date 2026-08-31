@@ -1,5 +1,5 @@
-import asyncio
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -64,38 +64,58 @@ class VertexGeminiClearanceAgent:
                 "GOOGLE_CLOUD_PROJECT is required when AGENT_MODE=vertex",
             )
         try:
-            from google import genai
-            from google.genai import types
+            from .adk_agent import build_clearance_app
         except ImportError as exc:
             raise AgentRuntimeError(
-                "google_genai_not_installed",
-                "Install the optional agent dependencies to use Vertex Gemini",
+                "google_adk_not_installed",
+                "Install the optional agent dependencies to use Vertex ADK with Gemini",
             ) from exc
 
-        self._types = types
         self._model_name = settings.gemini_model
-        self._client = genai.Client(
-            vertexai=True,
-            project=settings.google_cloud_project,
-            location=settings.google_cloud_location,
-        )
+        try:
+            self._app = build_clearance_app(settings)
+        except RuntimeError as exc:
+            raise AgentRuntimeError("google_adk_not_configured", str(exc)) from exc
 
     async def create_clearance_card(
         self, asset: Asset, sources: list[SourceRecord]
     ) -> ClearanceAgentOutput:
         prompt = self._build_prompt(asset, sources)
         try:
-            response = await asyncio.to_thread(
-                self._client.models.generate_content,
-                model=self._model_name,
-                contents=prompt,
-                config=self._types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0,
-                ),
+            response_text = ""
+            async for event in self._app.async_stream_query(
+                user_id=f"clearcut-asset-{asset.id}",
+                message=prompt,
+            ):
+                event_text = self._extract_event_text(event)
+                if event_text:
+                    # ADK may stream partial chunks or emit a complete final event.
+                    # Prefer a complete final event, while still supporting a final
+                    # chunk that only contains the tail of a streamed JSON object.
+                    if self._event_is_final(event):
+                        if self._looks_like_json(event_text) or not response_text:
+                            response_text = event_text
+                        else:
+                            response_text += event_text
+                    elif not response_text:
+                        response_text = event_text
+                    elif self._event_is_partial(event):
+                        response_text += event_text
+                    else:
+                        response_text = event_text
+            payload = self._parse_json(response_text)
+            output = self._parse_output(payload)
+            policy = calculate_risk(asset.category, len(sources), asset.reason_codes)
+            return ClearanceAgentOutput(
+                summary=output.summary,
+                recommendation=output.recommendation,
+                risk_score=policy.risk_score,
+                confidence_score=calculate_confidence(len(sources)),
+                reason_codes=policy.reason_codes,
+                needs_human_review=True,
+                generated_by=output.generated_by,
+                model_name=output.model_name,
             )
-            payload = json.loads(response.text or "")
-            return self._parse_output(payload)
         except AgentRuntimeError:
             raise
         except (ValueError, TypeError) as exc:
@@ -106,6 +126,62 @@ class VertexGeminiClearanceAgent:
             raise AgentRuntimeError(
                 "gemini_request_failed", "Gemini clearance-card generation failed"
             ) from exc
+
+    @staticmethod
+    def _extract_event_text(event: Any) -> str:
+        """Extract model text from an ADK JSON event without depending on SDK models."""
+        if isinstance(event, dict):
+            content = event.get("content")
+            direct_text = event.get("text")
+        else:
+            content = getattr(event, "content", None)
+            direct_text = getattr(event, "text", None)
+        if isinstance(direct_text, str) and direct_text.strip():
+            return direct_text.strip()
+        if isinstance(content, dict):
+            parts = content.get("parts") or []
+        else:
+            parts = getattr(content, "parts", None) or []
+        texts: list[str] = []
+        for part in parts:
+            if isinstance(part, dict):
+                text = part.get("text")
+            else:
+                text = getattr(part, "text", None)
+            if isinstance(text, str) and text.strip():
+                texts.append(text)
+        return "".join(texts).strip()
+
+    @staticmethod
+    def _event_is_final(event: Any) -> bool:
+        if isinstance(event, dict):
+            return bool(event.get("turn_complete") or event.get("is_final_response"))
+        return bool(getattr(event, "turn_complete", False))
+
+    @staticmethod
+    def _event_is_partial(event: Any) -> bool:
+        if isinstance(event, dict):
+            return bool(event.get("partial"))
+        return bool(getattr(event, "partial", False))
+
+    @staticmethod
+    def _looks_like_json(text: str) -> bool:
+        return "{" in text and "}" in text
+
+    @staticmethod
+    def _parse_json(text: str) -> dict[str, Any]:
+        cleaned = text.strip()
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE)
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+            if match is None:
+                raise
+            payload = json.loads(match.group(0))
+        if not isinstance(payload, dict):
+            raise ValueError("clearance card must be an object")
+        return payload
 
     @staticmethod
     def _build_prompt(asset: Asset, sources: list[SourceRecord]) -> str:
@@ -186,7 +262,7 @@ class VertexGeminiClearanceAgent:
             confidence_score=confidence_score,
             reason_codes=reason_codes,
             needs_human_review=True,
-            generated_by="vertex_gemini",
+            generated_by="vertex_adk_gemini",
             model_name=self._model_name,
         )
 

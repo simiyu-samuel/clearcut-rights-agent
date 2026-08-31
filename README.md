@@ -57,6 +57,7 @@ Clearance report + outreach actions
 - [Batch release plan](docs/12-batch-release-plan.md)
 - [Operations runbook](docs/13-operations-runbook.md)
 - [Video and audio ingestion design](docs/14-video-ingestion.md)
+- [Hackathon compliance checklist](docs/15-hackathon-compliance.md)
 
 Authentication configuration is documented in [infra/README.md](infra/README.md) and `.env.example`. The API uses Firebase/Identity Platform ID tokens outside local demo mode; never commit Firebase service-account keys or token values.
 
@@ -66,7 +67,7 @@ Authentication configuration is documented in [infra/README.md](infra/README.md)
 - [Favicon and app mark](assets/brand/clearcut-favicon.png)
 - [Devpost submission thumbnail](assets/brand/clearcut-devpost-thumbnail.png)
 
-+## Product capabilities
+## Product capabilities
 
 ### Workspace and project operations
 
@@ -100,7 +101,7 @@ Authentication configuration is documented in [infra/README.md](infra/README.md)
 
 - Typed Parallel Search and Extract provider adapter with a deterministic fixture implementation.
 - Live Parallel research mode for rights-related source discovery and evidence extraction.
-- Vertex Gemini clearance-card generation in hosted agent mode.
+- Vertex Gemini clearance-card generation through Google ADK `Agent` and Vertex `AdkApp` in hosted agent mode.
 - Evidence-backed clearance cards containing risk, confidence, reason codes, summary, recommendation, and source count.
 - Research sessions, child tasks, provider request IDs, quality tiers, evidence gaps, rechecks, and retryable failures.
 - Human approval decisions, notes, actor identity, timestamps, escalation, rejection, and re-review history.
@@ -165,11 +166,19 @@ Authentication configuration is documented in [infra/README.md](infra/README.md)
 | Local persistence | SQLite | Lightweight local development default |
 | Object storage | Google Cloud Storage | Original documents, media, and derived artifacts |
 | Research | Parallel Search and Extract adapter | External rights-source discovery and extraction |
-| Model runtime | Vertex Gemini / Google Gen AI | Media understanding and clearance-card generation |
+| Model runtime | Vertex Gemini / Google ADK / Google Gen AI | Media understanding and clearance-card generation |
 | Identity | Firebase / Google Identity Platform | Google and email/password authentication |
 | Hosting | Cloud Run | Web and API services plus migration job |
 | Delivery | Cloud Build and Artifact Registry | Reproducible image builds and versioned releases |
 | Secrets | Secret Manager | Database password and Parallel API key references |
+
+## Hackathon compliance
+
+ClearCut is built for the Parallel partner track. The deployed research workflow actively calls Parallel Search and Extract through the server-side adapter in `services/api/src/clearcut_api/providers/parallel_api.py`, with the API key kept in Secret Manager.
+
+The hosted clearance workflow uses Google ADK's `Agent` and Vertex `AdkApp` in `services/api/src/clearcut_api/adk_agent.py`, with Gemini running on Vertex AI. Google Cloud Run hosts the web and API services; Cloud SQL stores application state; Cloud Storage stores source documents and media; Cloud Build and Artifact Registry provide the release path.
+
+The repository is released under the OSI-approved Apache License 2.0. Demo fixtures and submission media must remain synthetic or owned by the team: no third-party music, footage, logos, or advertising should be included in the judging video. ClearCut provides rights-workflow triage and evidence organization, not legal advice or a legal-clearance decision.
 
 ## Repository layout
 

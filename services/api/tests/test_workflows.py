@@ -1,7 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
 
-from clearcut_api.agent_runtime import FixtureClearanceAgent
+from clearcut_api.agent_runtime import FixtureClearanceAgent, VertexGeminiClearanceAgent
 from clearcut_api.agent_tools import (
     REGISTERED_AGENT_TOOLS,
     calculate_clearance_risk,
@@ -52,7 +52,7 @@ from .test_api import make_database
 def test_fixture_script_extracts_scene_aware_assets() -> None:
     text = """## Scene 04 — The night bus
 
-        Mara waits while a radio plays **Midnight City** from the **Harbor Light Café** menu.
+        Mara waits while a radio plays **Neon Afterglow** from the **Harbor Light Café** menu.
 
 ## Scene 06 — The old station
 
@@ -62,11 +62,64 @@ The crew meets outside the **Old Railway Station** beside a **The Blue Hour** ph
     assets = extract_candidate_assets(text)
     by_name = {asset.canonical_name: asset for asset in assets}
 
-    assert by_name["Midnight City"].category == "music"
-    assert by_name["Midnight City"].risk_status == "high_risk"
-    assert by_name["Midnight City"].scene_reference == "04"
+    assert by_name["Neon Afterglow"].category == "music"
+    assert by_name["Neon Afterglow"].risk_status == "high_risk"
+    assert by_name["Neon Afterglow"].scene_reference == "04"
     assert by_name["Harbor Light Café"].category == "brand"
     assert by_name["Old Railway Station"].category == "location"
+
+
+def test_vertex_clearance_agent_parses_google_adk_stream_and_enforces_policy() -> None:
+    class FakeAdkApp:
+        async def async_stream_query(self, *, user_id: str, message: str):
+            assert user_id.startswith("clearcut-asset-")
+            assert '"required_json"' in message
+            yield {
+                "author": "clearcut_clearance_agent",
+                "content": {"parts": [{"function_call": {"name": "calculate_clearance_risk"}}]},
+            }
+            yield {
+                "author": "clearcut_clearance_agent",
+                "partial": True,
+                "content": {"parts": [{"text": '{"summary":"Evidence reviewed",'}]},
+            }
+            yield {
+                "author": "clearcut_clearance_agent",
+                "turn_complete": True,
+                "content": {
+                    "parts": [
+                        {
+                            "text": '"recommendation":"Confirm permission","risk_score":5,'
+                            '"confidence_score":0.1,"reason_codes":["model_code"],'
+                            '"needs_human_review":true}',
+                        }
+                    ]
+                },
+            }
+
+    asset = Asset(
+        organization_id="demo-org",
+        project_id="project-a",
+        document_id="document-a",
+        canonical_name="Neon Afterglow",
+        category="music",
+        context="A fictional song is audible in scene 04.",
+        extraction_confidence=0.9,
+        reason_codes=["recorded_music_signal"],
+    )
+    agent = VertexGeminiClearanceAgent.__new__(VertexGeminiClearanceAgent)
+    agent._app = FakeAdkApp()
+    agent._model_name = "gemini-2.5-flash"
+
+    output = asyncio.run(agent.create_clearance_card(asset, []))
+
+    assert output.summary == "Evidence reviewed"
+    assert output.recommendation == "Confirm permission"
+    assert output.risk_score == 90
+    assert output.confidence_score == 0.2
+    assert output.reason_codes == ["insufficient_evidence", "recorded_music_signal"]
+    assert output.needs_human_review is True
+    assert output.generated_by == "vertex_adk_gemini"
 
 
 def test_category_playbook_exposes_rights_specific_questions() -> None:
@@ -80,7 +133,7 @@ def test_category_playbook_exposes_rights_specific_questions() -> None:
 def test_document_analysis_persists_assets_and_updates_job(tmp_path) -> None:
     database = make_database()
     store = LocalObjectStore(str(tmp_path))
-    content = "## Scene 04 — Night\nA radio plays **Midnight City**."
+    content = "## Scene 04 — Night\nA radio plays **Neon Afterglow**."
 
     with database.session_factory() as session:
         project = ProjectRepository(session).create(
@@ -118,7 +171,7 @@ def test_document_analysis_persists_assets_and_updates_job(tmp_path) -> None:
         assert stored_job is not None and stored_job.status == "awaiting_review"
         assert stored_document is not None and stored_document.status == "analyzed"
         assert len(assets) == 1
-        assert assets[0].canonical_name == "Midnight City"
+        assert assets[0].canonical_name == "Neon Afterglow"
 
 
 def test_media_analysis_persists_transcript_and_metadata(tmp_path) -> None:
@@ -177,7 +230,7 @@ def test_vertex_media_payload_normalizes_timestamped_rights_signals() -> None:
           "duration_seconds": 65.5,
           "segments": [{"start_seconds": 42, "end_seconds": 48, "description": "Radio"}],
           "assets": [{
-            "name": "Midnight City",
+            "name": "Neon Afterglow",
             "category": "music",
             "context": "The track is audible from a radio.",
             "start_seconds": 42,
@@ -203,7 +256,7 @@ def test_parallel_search_response_is_normalized() -> None:
 
     async def fake_post(path: str, payload: dict) -> dict:
         assert path == "/v1/search"
-        assert payload["search_queries"] == ["Midnight City licensing"]
+        assert payload["search_queries"] == ["Neon Afterglow licensing"]
         return {
             "search_id": "search_fixture_001",
             "results": [
@@ -217,7 +270,7 @@ def test_parallel_search_response_is_normalized() -> None:
 
     provider._post = fake_post  # type: ignore[method-assign]
     results = asyncio.run(
-        provider.search("Midnight City licensing", objective="Find the rights owner.")
+        provider.search("Neon Afterglow licensing", objective="Find the rights owner.")
     )
 
     assert len(results) == 1
@@ -232,9 +285,9 @@ def test_fixture_clearance_agent_requires_human_review() -> None:
         organization_id="demo-org",
         project_id="project-1",
         document_id="document-1",
-        canonical_name="Midnight City",
+        canonical_name="Neon Afterglow",
         category="music",
-        context="A radio plays Midnight City.",
+        context="A radio plays Neon Afterglow.",
         source_start=0,
         source_end=32,
         extraction_confidence=0.9,
@@ -258,7 +311,7 @@ def test_fixture_clearance_agent_requires_human_review() -> None:
 
 def test_registered_agent_tools_use_fixture_provider_and_preserve_review_boundary() -> None:
     search_result = asyncio.run(
-        search_rights_sources("Midnight City licensing", "Find the rights owner.", "run-1")
+        search_rights_sources("Neon Afterglow licensing", "Find the rights owner.", "run-1")
     )
     extract_result = asyncio.run(
         extract_rights_source("https://example.com/rights", "Extract licensing evidence.", "run-1")
@@ -289,9 +342,9 @@ def test_outreach_draft_and_report_keep_human_boundary() -> None:
         organization_id="demo-org",
         project_id="project-1",
         document_id="document-1",
-        canonical_name="Midnight City",
+        canonical_name="Neon Afterglow",
         category="music",
-        context="A radio plays Midnight City.",
+        context="A radio plays Neon Afterglow.",
         source_start=0,
         source_end=32,
         extraction_confidence=0.9,
@@ -323,7 +376,7 @@ def test_outreach_draft_and_report_keep_human_boundary() -> None:
     subject, body = build_outreach_draft(project, asset, card, "Rights contact")
     report = build_clearance_report(project, [asset], [card], [source])
 
-    assert "Midnight City" in subject
+    assert "Neon Afterglow" in subject
     assert "information request only" in body
     assert "Internal research note" not in body
     assert "not legal advice" in report
@@ -345,14 +398,14 @@ def test_clearance_report_pdf_is_branded_and_structured() -> None:
 
 | Asset | Category | Status | Risk | Confidence | Evidence |
 |---|---|---|---:|---:|---:|
-| Midnight City | music | pending_review | 90/100 | 100% | 1 |
+| Neon Afterglow | music | pending_review | 90/100 | 100% | 1 |
 
 ## Detailed review
 
-### Midnight City
+### Neon Afterglow
 
 - Category: music
-- Context: A radio plays Midnight City.
+- Context: A radio plays Neon Afterglow.
 - Clearance card status: `pending_review`
 - Risk score: `90/100`
 - Confidence: `100%`
@@ -366,13 +419,13 @@ Evidence:
 
 | Asset | Decision | Actor | Recorded | Note |
 |---|---|---|---|---|
-| Midnight City | escalate_to_legal | demo-reviewer | 2026-08-24T10:02:00+00:00 | Confirm sync and master rights. |
+| Neon Afterglow | escalate_to_legal | demo-reviewer | 2026-08-24T10:02:00+00:00 | Confirm sync and master rights. |
 
 ## Permission work
 
 | Asset | Status | Recipient | Due | Subject |
 |---|---|---|---|---|
-| Midnight City | approved | rights@example.com | 2026-09-01T00:00:00+00:00 | Music rights information request |
+| Neon Afterglow | approved | rights@example.com | 2026-09-01T00:00:00+00:00 | Music rights information request |
 """
 
     pdf = build_pdf(markdown)
@@ -380,7 +433,7 @@ Evidence:
     assert pdf.startswith(b"%PDF-1.4")
     assert b"/Type /Pages" in pdf
     assert b"CLEARCUT" in pdf
-    assert b"Midnight City" in pdf
+    assert b"Neon Afterglow" in pdf
     assert b"Human accountability" in pdf
     assert b"demo-reviewer" in pdf
     assert b"PERMISSION WORK" in pdf
@@ -398,9 +451,9 @@ def test_report_flattens_multiline_evidence_and_pdf_ignores_embedded_headings() 
         organization_id="demo-org",
         project_id="project-1",
         document_id="document-1",
-        canonical_name="Midnight City",
+        canonical_name="Neon Afterglow",
         category="music",
-        context="A radio plays Midnight City.",
+        context="A radio plays Neon Afterglow.",
         source_start=0,
         source_end=32,
         extraction_confidence=0.9,
@@ -455,9 +508,9 @@ def test_research_run_creates_evidence_backed_clearance_card() -> None:
             organization_id="demo-org",
             project_id=project.id,
             document_id="document-1",
-            canonical_name="Midnight City",
+            canonical_name="Neon Afterglow",
             category="music",
-            context="A radio plays Midnight City.",
+            context="A radio plays Neon Afterglow.",
             source_start=0,
             source_end=32,
             extraction_confidence=0.9,
@@ -472,7 +525,7 @@ def test_research_run_creates_evidence_backed_clearance_card() -> None:
                 provider="parallel",
                 operation="search",
                 objective="Find the rights owner.",
-                query="Midnight City licensing",
+                query="Neon Afterglow licensing",
             )
         )
 
@@ -507,9 +560,9 @@ def test_multi_angle_research_session_aggregates_tasks_and_evidence() -> None:
             organization_id="demo-org",
             project_id=project.id,
             document_id="document-1",
-            canonical_name="Midnight City",
+            canonical_name="Neon Afterglow",
             category="music",
-            context="A radio plays Midnight City.",
+            context="A radio plays Neon Afterglow.",
             source_start=0,
             source_end=32,
             extraction_confidence=0.9,
@@ -525,7 +578,7 @@ def test_multi_angle_research_session_aggregates_tasks_and_evidence() -> None:
                 provider="parallel",
                 operation="multi_angle_search",
                 objective=objective,
-                query="Midnight City music rights clearance research session",
+                query="Neon Afterglow music rights clearance research session",
             )
         )
         research_session = ResearchSessionRepository(session).create(

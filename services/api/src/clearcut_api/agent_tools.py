@@ -93,3 +93,8 @@ REGISTERED_AGENT_TOOLS = [
     calculate_clearance_risk,
     request_human_approval,
 ]
+
+# The clearance-card agent receives the deterministic policy tool only. Research
+# is performed by the authenticated workflow before this agent is invoked, while
+# the broader registry remains available to an orchestration/Agent Engine entrypoint.
+CLEARANCE_AGENT_TOOLS = [calculate_clearance_risk]

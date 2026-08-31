@@ -20,6 +20,8 @@ Upload a short fictional screenplay containing:
 - a photograph or artwork reference;
 - a sports organization reference.
 
+The checked-in screenplay fixture is synthetic. Do not add real songs, footage, logos, or other third-party media to the demo recording.
+
 Show the analysis job moving from `queued` to `running`.
 
 ## 0:45–1:15 — Extract the rights inventory
@@ -76,4 +78,3 @@ Closing line:
 - keep a pre-generated report ready in case of provider failure;
 - demonstrate a human approval boundary;
 - show one incomplete or conflicting result.
-

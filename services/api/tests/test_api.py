@@ -182,7 +182,7 @@ def test_approval_history_is_newest_first_and_tenant_scoped() -> None:
             organization_id="studio-a",
             project_id=project.id,
             document_id="document-a",
-            canonical_name="Midnight City",
+            canonical_name="Neon Afterglow",
             category="Music",
             context="Radio in scene 4",
             source_start=1,

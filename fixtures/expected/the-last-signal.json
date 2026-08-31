@@ -1,7 +1,7 @@
 {
   "project_title": "The Last Signal",
   "assets": [
-    {"canonical_name": "Midnight City", "category": "music", "source_scene": "04", "expected_status": "high_risk"},
+    {"canonical_name": "Neon Afterglow", "category": "music", "source_scene": "04", "expected_status": "high_risk"},
     {"canonical_name": "Harbor Light Café", "category": "brand", "source_scene": "04", "expected_status": "needs_review"},
     {"canonical_name": "Old Railway Station", "category": "location", "source_scene": "06", "expected_status": "needs_review"},
     {"canonical_name": "The Blue Hour", "category": "artwork", "source_scene": "06", "expected_status": "needs_review"},
