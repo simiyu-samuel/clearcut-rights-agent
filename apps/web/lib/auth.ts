@@ -37,6 +37,12 @@ export function firebaseIsConfigured(): boolean {
   );
 }
 
+export function demoLoginIsConfigured(): boolean {
+  return process.env.NEXT_PUBLIC_AUTH_MODE === "identity_platform" &&
+    process.env.NEXT_PUBLIC_DEMO_ENABLED === "true" &&
+    Boolean(process.env.NEXT_PUBLIC_DEMO_EMAIL && process.env.NEXT_PUBLIC_DEMO_PASSWORD);
+}
+
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 
@@ -66,6 +72,14 @@ export async function signInWithEmail(email: string, password: string): Promise<
   return signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
 }
 
+export async function signInWithDemo(): Promise<UserCredential> {
+  if (!demoLoginIsConfigured()) throw new Error("demo_login_not_configured");
+  return signInWithEmail(
+    process.env.NEXT_PUBLIC_DEMO_EMAIL ?? "",
+    process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? "",
+  );
+}
+
 export async function registerWithEmail(
   email: string,
   password: string,
@@ -90,6 +104,7 @@ export function authErrorMessage(error: unknown): string {
   const code = typeof error === "object" && error && "code" in error
     ? String((error as { code?: unknown }).code)
     : "";
+  const message = error instanceof Error ? error.message : "";
   switch (code) {
     case "auth/email-already-in-use":
       return "An account already exists for this email. Sign in instead.";
@@ -106,8 +121,12 @@ export function authErrorMessage(error: unknown): string {
       return "Your browser blocked the Google sign-in window. Allow pop-ups and try again.";
     case "auth/too-many-requests":
       return "Too many attempts. Wait a moment and try again.";
+    case "demo_login_not_configured":
+      return "The judge demo is not configured for this deployment.";
     default:
-      return error instanceof Error ? error.message : "Unable to authenticate.";
+      return message === "demo_login_not_configured"
+        ? "The judge demo is not configured for this deployment."
+        : message || "Unable to authenticate.";
   }
 }
 

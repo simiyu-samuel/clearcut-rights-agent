@@ -59,8 +59,24 @@ Clearance report + outreach actions
 - [Video and audio ingestion design](docs/14-video-ingestion.md)
 - [Hackathon compliance checklist](docs/15-hackathon-compliance.md)
 - [Devpost submission draft](docs/17-devpost-submission.md)
+- [Judge demo access and seeded journey](docs/18-judge-demo-access.md)
 
 Authentication configuration is documented in [infra/README.md](infra/README.md) and `.env.example`. The API uses Firebase/Identity Platform ID tokens outside local demo mode; never commit Firebase service-account keys or token values.
+
+### Public demo access
+
+The hosted release can expose a deliberately isolated, read/write demo workspace for reviewers. Create this dedicated email/password user in the Firebase Authentication console, then enable the demo variables in the web build and API runtime:
+
+~~~text
+Email:    demo@clearcut.app
+Password: ClearCut-Judge-2026!
+~~~
+
+The login screen will show **Demo login** when the web build has `NEXT_PUBLIC_DEMO_ENABLED=true`. The first successful sign-in provisions the Firebase user into the separate `DEMO` organization with a populated **The Last Signal** project, five extracted assets, Parallel research snapshots, Gemini/Vertex-labelled clearance cards, evidence, a permission-request draft, activity history, and a ready report. The seed is idempotent, so repeated sessions do not create duplicate projects or cards.
+
+The same fictional screenplay is available at [fixtures/scripts/judge-demo-the-last-signal.md](fixtures/scripts/judge-demo-the-last-signal.md) for a manual upload walkthrough.
+
+This is a public demonstration credential by design. It must be used only for the isolated demo workspace, must not contain customer data, and should be rotated or disabled after judging. Normal users should continue with Google, email/password registration, or an invitation.
 
 ## Brand assets
 
@@ -83,6 +99,7 @@ Authentication configuration is documented in [infra/README.md](infra/README.md)
 
 - Firebase/Google Identity Platform authentication for shared environments.
 - Google sign-in, email/password registration, email/password sign-in, and password reset.
+- Optional public judge-demo sign-in that provisions one isolated, populated workspace for reviewers.
 - First-user workspace creation.
 - Email-based workspace invitations; invited users sign in with the invited email and are connected automatically.
 - Verified Firebase ID tokens, tenant-scoped API requests, and server-side membership checks.
@@ -293,8 +310,15 @@ The complete safe template is in .env.example. The main variables are:
 | NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN | Web | Firebase web app public configuration |
 | NEXT_PUBLIC_FIREBASE_PROJECT_ID | Web | Firebase project used by the client |
 | NEXT_PUBLIC_FIREBASE_APP_ID | Web | Firebase web app public configuration |
+| NEXT_PUBLIC_DEMO_ENABLED | Web | Shows the public judge-demo button when true |
+| NEXT_PUBLIC_DEMO_EMAIL | Web | Dedicated Firebase demo email compiled into the hosted demo build |
+| NEXT_PUBLIC_DEMO_PASSWORD | Web | Dedicated public demo password compiled into the hosted demo build |
 | AUTH_MODE | API | API authentication mode |
 | AUTH_AUDIENCE | API | Firebase token audience |
+| DEMO_ACCESS_ENABLED | API | Enables isolated demo-workspace provisioning when true |
+| DEMO_ACCESS_EMAIL | API | Firebase email allowed to receive the demo workspace |
+| DEMO_ACCESS_ORGANIZATION_ID | API | Dedicated demo tenant identifier |
+| DEMO_ACCESS_ORGANIZATION_NAME | API | Display name for the seeded demo tenant |
 | DATABASE_URL | API | Local database URL; omit in Cloud Run with Cloud SQL variables |
 | DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD | API | Managed PostgreSQL connection values |
 | CLOUD_SQL_CONNECTION_NAME | API | Cloud SQL Unix-socket connection name |
@@ -466,7 +490,18 @@ Build both images with the production web API URL and Firebase public configurat
 PROJECT_ID=clearcut-rights-dev
 REGION=us-central1
 BUILD_TAG=staging-$(date +%Y%m%d%H%M%S)
-gcloud builds submit . --config=infra/cloudbuild-images.yaml --substitutions="_TAG=$BUILD_TAG,_NEXT_PUBLIC_API_URL=$API_URL,_NEXT_PUBLIC_AUTH_MODE=identity_platform,_NEXT_PUBLIC_FIREBASE_API_KEY=$FIREBASE_API_KEY,_NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=$FIREBASE_AUTH_DOMAIN,_NEXT_PUBLIC_FIREBASE_PROJECT_ID=$PROJECT_ID,_NEXT_PUBLIC_FIREBASE_APP_ID=$FIREBASE_APP_ID,_NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=$FIREBASE_MESSAGING_SENDER_ID" --project="$PROJECT_ID"
+DEMO_EMAIL=demo@clearcut.app
+DEMO_PASSWORD='ClearCut-Judge-2026!'
+gcloud builds submit . --config=infra/cloudbuild-images.yaml --substitutions="_TAG=$BUILD_TAG,_NEXT_PUBLIC_API_URL=$API_URL,_NEXT_PUBLIC_AUTH_MODE=identity_platform,_NEXT_PUBLIC_FIREBASE_API_KEY=$FIREBASE_API_KEY,_NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=$FIREBASE_AUTH_DOMAIN,_NEXT_PUBLIC_FIREBASE_PROJECT_ID=$PROJECT_ID,_NEXT_PUBLIC_FIREBASE_APP_ID=$FIREBASE_APP_ID,_NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=$FIREBASE_MESSAGING_SENDER_ID,_NEXT_PUBLIC_DEMO_ENABLED=true,_NEXT_PUBLIC_DEMO_EMAIL=$DEMO_EMAIL,_NEXT_PUBLIC_DEMO_PASSWORD=$DEMO_PASSWORD" --project="$PROJECT_ID"
+~~~
+
+The API service must receive the matching non-secret allowlist configuration. Do not put the demo password in the API or Secret Manager; Firebase verifies it and the API only checks the verified email claim:
+
+~~~bash
+gcloud run services update clearcut-api \
+  --region="$REGION" \
+  --update-env-vars="DEMO_ACCESS_ENABLED=true,DEMO_ACCESS_EMAIL=$DEMO_EMAIL,DEMO_ACCESS_ORGANIZATION_ID=clearcut-demo-org,DEMO_ACCESS_ORGANIZATION_NAME=DEMO,DEMO_ACCESS_ROLE=producer" \
+  --project="$PROJECT_ID"
 ~~~
 
 Run the migration job before routing the new images to traffic. The exact IAM, Secret Manager, Cloud SQL, Cloud Storage, CORS, and rollback procedures are documented in [infra/README.md](infra/README.md), [docs/12-batch-release-plan.md](docs/12-batch-release-plan.md), and [docs/13-operations-runbook.md](docs/13-operations-runbook.md).

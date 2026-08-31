@@ -759,6 +759,8 @@ button { font: inherit; }
 .auth-card h1 { font-size: 30px; letter-spacing: -.06em; line-height: 1.05; margin: 0; }
 .auth-card p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0 0 8px; }
 .auth-methods { display: grid; gap: 12px; }
+
+.auth-demo-note { color: var(--subtle); font-size: 10px; line-height: 1.45; margin-top: -3px; text-align: center; }
 .auth-form { display: grid; gap: 12px; }
 .auth-divider { align-items: center; color: var(--subtle); display: flex; font-size: 10px; gap: 10px; letter-spacing: .1em; text-transform: uppercase; }
 .auth-divider::before, .auth-divider::after { background: var(--line); content: ""; flex: 1; height: 1px; }

@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from .auth import AuthenticatedIdentity, authenticate_request
 from .config import settings
 from .db import Database, create_database
+from .demo_seed import ensure_demo_workspace
 from .models import (
     ApiKey,
     Approval,
@@ -576,6 +577,12 @@ def create_app(
                 changed = True
             if changed:
                 session.commit()
+            if (
+                settings.demo_access_enabled
+                and settings.demo_access_email
+                and normalized_email == settings.demo_access_email.strip().lower()
+            ):
+                ensure_demo_workspace(session, object_store, settings, identity)
         memberships = MembershipRepository(session).list_for_actor(identity.actor_id)
         if settings.auth_mode == "demo" and not memberships:
             now = datetime.now(UTC)

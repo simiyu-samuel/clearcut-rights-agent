@@ -14,6 +14,20 @@ class Settings:
         "AUTH_MODE", "demo" if os.getenv("ENVIRONMENT", "development") == "development" else "identity_platform"
     )
     auth_audience: str | None = os.getenv("AUTH_AUDIENCE") or None
+    demo_access_enabled: bool = os.getenv("DEMO_ACCESS_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    demo_access_email: str | None = os.getenv("DEMO_ACCESS_EMAIL") or None
+    demo_access_organization_id: str = os.getenv(
+        "DEMO_ACCESS_ORGANIZATION_ID", "clearcut-demo-org"
+    )
+    demo_access_organization_name: str = os.getenv(
+        "DEMO_ACCESS_ORGANIZATION_NAME", "DEMO"
+    )
+    demo_access_role: str = os.getenv("DEMO_ACCESS_ROLE", "producer")
     database_url: str | None = os.getenv("DATABASE_URL") or None
     database_name: str = os.getenv("DATABASE_NAME", "clearcut")
     database_user: str | None = os.getenv("DATABASE_USER") or None

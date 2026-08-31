@@ -8,6 +8,7 @@ import {
   firebaseIsConfigured,
   registerWithEmail,
   resetPassword,
+  signInWithDemo,
   signInWithEmail,
   signInWithGoogle,
   signOut,
@@ -43,6 +44,7 @@ type AuthContextValue = {
   organizationId: string | null;
   organizationRole: string | null;
   signInWithGoogle: () => Promise<void>;
+  signInWithDemo: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   registerWithEmail: (email: string, password: string, displayName: string) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -176,6 +178,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         memberships.find((item) => item.organization_id === organizationId)?.role ?? null,
       signInWithGoogle: async () => {
         await signInWithGoogle();
+      },
+      signInWithDemo: async () => {
+        await signInWithDemo();
       },
       signInWithEmail: async (email: string, password: string) => {
         await signInWithEmail(email, password);
