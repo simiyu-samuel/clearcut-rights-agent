@@ -58,6 +58,7 @@ Clearance report + outreach actions
 - [Operations runbook](docs/13-operations-runbook.md)
 - [Video and audio ingestion design](docs/14-video-ingestion.md)
 - [Hackathon compliance checklist](docs/15-hackathon-compliance.md)
+- [Devpost submission draft](docs/17-devpost-submission.md)
 
 Authentication configuration is documented in [infra/README.md](infra/README.md) and `.env.example`. The API uses Firebase/Identity Platform ID tokens outside local demo mode; never commit Firebase service-account keys or token values.
 
