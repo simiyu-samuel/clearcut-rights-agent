@@ -6,7 +6,7 @@
   <img src="assets/brand/clearcut-logo.png" alt="ClearCut logo" width="620">
 </p>
 
-<p align="center"><em>Turn scripts and rough cuts into evidence-backed rights plans.</em></p>
+<p align="center"><em>ClearCut turns scripts and rough cuts into evidence-backed rights intelligence—finding protected assets, researching ownership with Parallel, and routing every decision to a human reviewer.</em></p>
 
 ![ClearCut Devpost thumbnail](assets/brand/clearcut-devpost-thumbnail.png)
 
@@ -16,9 +16,9 @@ ClearCut turns a screenplay, shot list, or rough cut into a structured rights-cl
 
 ## Project status
 
-This repository contains a deployed staging vertical slice for the Agentic Cinema hackathon. The Google Cloud and Parallel integrations are connected, and the production-shaped research, review, permission-work, audit, and reporting flows have been exercised end to end.
+This repository contains the verified hackathon release candidate for Agentic Cinema. The deployed Google Cloud and Parallel integrations, authenticated workspace, media ingestion, research, review, permission-work, audit, and reporting flows have been exercised end to end.
 
-The latest local changes include real Identity Platform authentication/RBAC foundations, a tabbed project workspace, styled report/PDF rendering fixes, submission brand assets, and the first video/audio ingestion path. Media is uploaded to Cloud Storage, analyzed through the existing review-gated job workflow, and represented as timestamped rights signals. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions, [docs/12-batch-release-plan.md](docs/12-batch-release-plan.md) for the release gate, and [docs/13-operations-runbook.md](docs/13-operations-runbook.md) for operating procedures.
+The current release includes Firebase/Identity Platform authentication and RBAC, a tabbed project workspace, styled reports and PDF export, submission brand assets, video/audio ingestion, Gemini media analysis, live Parallel research, structured Gemini clearance cards, and human approval workflows. Media is uploaded to Cloud Storage, analyzed through the review-gated workflow, and represented as timestamped rights signals. See [CONTRIBUTING.md](CONTRIBUTING.md) for repository conventions, [docs/12-batch-release-plan.md](docs/12-batch-release-plan.md) for the release process, and [docs/13-operations-runbook.md](docs/13-operations-runbook.md) for operating procedures.
 
 ## Primary partner track
 
@@ -412,18 +412,20 @@ Supported formats and operational limits are documented in [docs/14-video-ingest
 gcloud storage buckets update gs://$ASSET_BUCKET --cors-file=infra/gcs-media-cors.json
 ~~~
 
-The next hardening pass should add codec and duration probing, shot thumbnails, durable long-running job execution, lifecycle retention policies, and explicit deletion controls for large media.
+The current media path is complete for the hackathon release. Post-hackathon hardening can add deeper codec and duration validation, shot thumbnails, durable long-running job execution, lifecycle retention policies, and explicit deletion controls for large media.
 
 ## Testing and quality checks
 
 ~~~bash
+source .venv/bin/activate
 make api-test
 make api-lint
 make contracts-check
 make web-build
-npm run web:lint
 git diff --check
 ~~~
+
+The API test and lint commands expect the project virtual environment to be active. The Next.js production build performs the web type and build validation used for the release; `next lint` is deprecated in the current Next.js version and is not part of the release gate.
 
 The canonical synthetic sample is [fixtures/scripts/the-last-signal.md](fixtures/scripts/the-last-signal.md). Its expected extraction output is [fixtures/expected/the-last-signal.json](fixtures/expected/the-last-signal.json).
 
@@ -478,20 +480,18 @@ Run the migration job before routing the new images to traffic. The exact IAM, S
 - Source material remains in private object storage; review links are scoped and revocable.
 - No service-account key file belongs in the repository or container image.
 
-## Current status and next release gate
+## Release status and post-hackathon roadmap
 
-The working vertical slice now covers authenticated workspace access, project and source management, script and media ingestion, agent-backed research, evidence and risk cards, human decisions, permission drafts, audit history, styled reports, and PDF export.
+The `v1.0.0-hackathon` release candidate covers authenticated workspace access, project and source management, script and media ingestion, agent-backed research, evidence and risk cards, human decisions, permission drafts, audit history, styled reports, and PDF export. The hosted release has passed the API test suite, API lint, TypeScript contract checks, production web build, Cloud Run health/readiness/CORS checks, and a fresh end-to-end research workflow.
 
-Before calling the system production-ready for a real studio, the highest-value remaining work is:
+For sustained use by a real studio beyond the hackathon, the highest-value hardening work is:
 
-1. Finish the UI review against every Stitch screen and verify laptop/tablet responsive behavior.
-2. Replace remaining demo assumptions in less-traveled UI paths with authenticated live API behavior.
-3. Add durable asynchronous execution, retry budgets, idempotency keys, and dead-letter handling for long media/research jobs.
-4. Add ownership, assignees, due dates, saved filters, bulk operations, and delivery-readiness controls.
-5. Harden media processing with codec/duration validation, thumbnails, retention, deletion controls, and larger-file tests.
-6. Expand evaluation fixtures for source conflicts, prompt injection, unsupported certainty, stale evidence, and human corrections.
-7. Add CI enforcement for tests, lint, type checks, dependency scanning, secret scanning, container scanning, migrations, and release smoke tests.
-8. Complete backups, restore verification, alerting, cost limits, rate limiting, and incident response controls.
+1. Add durable asynchronous execution, retry budgets, idempotency keys, and dead-letter handling for long media and research jobs.
+2. Add ownership, assignees, due dates, saved filters, bulk operations, and delivery-readiness controls.
+3. Harden media processing with codec/duration validation, thumbnails, retention, deletion controls, and larger-file tests.
+4. Expand evaluation fixtures for source conflicts, prompt injection, unsupported certainty, stale evidence, and human corrections.
+5. Add CI enforcement for tests, lint, type checks, dependency scanning, secret scanning, container scanning, migrations, and release smoke tests.
+6. Complete backups, restore verification, alerting, cost limits, rate limiting, and incident response controls.
 
 The hackathon proof is the core product loop; this list is the hardening path for sustained organizational use.
 
