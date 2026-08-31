@@ -141,9 +141,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .then((payload) => {
           if (!active) return;
           const stored = window.localStorage.getItem(organizationStorageKey);
-          const selected = payload.memberships.some((item) => item.organization_id === stored)
-            ? stored
-            : payload.memberships[0]?.organization_id ?? null;
+          const demoOrganizationId = process.env.NEXT_PUBLIC_DEMO_ORGANIZATION_ID ?? "clearcut-demo-org";
+          const isConfiguredDemoAccount = Boolean(
+            process.env.NEXT_PUBLIC_DEMO_EMAIL &&
+              payload.identity.email?.trim().toLowerCase() ===
+                process.env.NEXT_PUBLIC_DEMO_EMAIL.trim().toLowerCase(),
+          );
+          const selected = isConfiguredDemoAccount &&
+            payload.memberships.some((item) => item.organization_id === demoOrganizationId)
+            ? demoOrganizationId
+            : payload.memberships.some((item) => item.organization_id === stored)
+              ? stored
+              : payload.memberships[0]?.organization_id ?? null;
           if (selected) window.localStorage.setItem(organizationStorageKey, selected);
           setUser({
             actorId: payload.identity.actor_id,

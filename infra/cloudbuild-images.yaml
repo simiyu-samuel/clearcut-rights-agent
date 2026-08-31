@@ -12,6 +12,7 @@ substitutions:
   _NEXT_PUBLIC_DEMO_ENABLED: "false"
   _NEXT_PUBLIC_DEMO_EMAIL: ""
   _NEXT_PUBLIC_DEMO_PASSWORD: ""
+  _NEXT_PUBLIC_DEMO_ORGANIZATION_ID: clearcut-demo-org
 
 steps:
   - id: build-api
@@ -45,6 +46,7 @@ steps:
       - --build-arg=NEXT_PUBLIC_DEMO_ENABLED=${_NEXT_PUBLIC_DEMO_ENABLED}
       - --build-arg=NEXT_PUBLIC_DEMO_EMAIL=${_NEXT_PUBLIC_DEMO_EMAIL}
       - --build-arg=NEXT_PUBLIC_DEMO_PASSWORD=${_NEXT_PUBLIC_DEMO_PASSWORD}
+      - --build-arg=NEXT_PUBLIC_DEMO_ORGANIZATION_ID=${_NEXT_PUBLIC_DEMO_ORGANIZATION_ID}
       - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/clearcut-web:${_TAG}
       - .
 

@@ -22,6 +22,7 @@ Web build arguments:
 NEXT_PUBLIC_DEMO_ENABLED=true
 NEXT_PUBLIC_DEMO_EMAIL=demo@clearcut.app
 NEXT_PUBLIC_DEMO_PASSWORD=ClearCut-Judge-2026!
+NEXT_PUBLIC_DEMO_ORGANIZATION_ID=clearcut-demo-org
 ~~~
 
 API runtime variables:
