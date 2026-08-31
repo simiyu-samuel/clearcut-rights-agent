@@ -1,6 +1,8 @@
 import asyncio
+import logging
 from datetime import UTC, datetime
 
+import clearcut_api.workflows as workflows
 from clearcut_api.agent_runtime import FixtureClearanceAgent, VertexGeminiClearanceAgent
 from clearcut_api.agent_tools import (
     REGISTERED_AGENT_TOOLS,
@@ -26,7 +28,7 @@ from clearcut_api.models import (
 from clearcut_api.outreach import build_outreach_draft
 from clearcut_api.pdf import _parse_report, build_pdf
 from clearcut_api.playbooks import playbook_for
-from clearcut_api.providers.parallel_api import ParallelApiProvider
+from clearcut_api.providers.parallel_api import ParallelApiProvider, ParallelProviderError
 from clearcut_api.reporting import build_clearance_report
 from clearcut_api.repositories import (
     AssetRepository,
@@ -585,6 +587,202 @@ def test_research_run_creates_evidence_backed_clearance_card() -> None:
         assert card.evidence_count == 1
         assert card.status == "pending_review"
         assert card.needs_human_review is True
+
+
+def test_research_run_provider_failure_is_terminal_and_logged(caplog, monkeypatch) -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        project = ProjectRepository(session).create(
+            Project(
+                organization_id="demo-org", title="Research failure", project_type="Feature film"
+            )
+        )
+        asset = Asset(
+            organization_id="demo-org",
+            project_id=project.id,
+            document_id="document-1",
+            canonical_name="Neon Afterglow",
+            category="music",
+            context="A radio plays Neon Afterglow.",
+            source_start=0,
+            source_end=32,
+            extraction_confidence=0.9,
+            risk_status="high_risk",
+            reason_codes=["music_identified"],
+        )
+        AssetRepository(session).create_many([asset])
+        run = ResearchRunRepository(session).create(
+            ResearchRun(
+                organization_id="demo-org",
+                asset_id=asset.id,
+                provider="parallel",
+                operation="search",
+                objective="Find the rights owner.",
+                query="Neon Afterglow licensing",
+            )
+        )
+
+    class FailingProvider:
+        async def search(self, query, *, objective, session_id=None):
+            del query, objective, session_id
+            raise ParallelProviderError("parallel_http_401", "provider authentication failed")
+
+        async def extract(self, url, *, objective, session_id=None):
+            del url, objective, session_id
+            raise AssertionError("extract must not run after search failure")
+
+    monkeypatch.setattr(workflows, "make_research_provider", lambda runtime_settings: FailingProvider())
+    with caplog.at_level(logging.INFO, logger="clearcut.research"):
+        asyncio.run(
+            process_research_run(
+                database,
+                run.id,
+                "demo-org",
+                Settings(parallel_mode="live", agent_mode="fixture", parallel_api_key="test-key"),
+            )
+        )
+
+    with database.session_factory() as session:
+        stored_run = ResearchRunRepository(session).get(run.id, "demo-org")
+        assert stored_run is not None
+        assert stored_run.status == "failed"
+        assert stored_run.error_code == "parallel_http_401"
+
+    failure_records = [
+        record for record in caplog.records if record.name == "clearcut.research"
+    ]
+    assert any('"event": "research_workflow_failed"' in record.message for record in failure_records)
+    assert any('"stage": "provider_search"' in record.message for record in failure_records)
+    assert any('"error_code": "parallel_http_401"' in record.message for record in failure_records)
+
+
+def test_research_run_unexpected_failure_is_terminal_and_logged(caplog, monkeypatch) -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        project = ProjectRepository(session).create(
+            Project(
+                organization_id="demo-org", title="Research failure", project_type="Feature film"
+            )
+        )
+        asset = Asset(
+            organization_id="demo-org",
+            project_id=project.id,
+            document_id="document-1",
+            canonical_name="Neon Afterglow",
+            category="music",
+            context="A radio plays Neon Afterglow.",
+            source_start=0,
+            source_end=32,
+            extraction_confidence=0.9,
+            risk_status="high_risk",
+            reason_codes=["music_identified"],
+        )
+        AssetRepository(session).create_many([asset])
+        run = ResearchRunRepository(session).create(
+            ResearchRun(
+                organization_id="demo-org",
+                asset_id=asset.id,
+                provider="parallel",
+                operation="search",
+                objective="Find the rights owner.",
+                query="Neon Afterglow licensing",
+            )
+        )
+
+    class FailingProvider:
+        async def search(self, query, *, objective, session_id=None):
+            del query, objective, session_id
+            raise RuntimeError("unexpected provider boundary failure")
+
+        async def extract(self, url, *, objective, session_id=None):
+            del url, objective, session_id
+            raise AssertionError("extract must not run after search failure")
+
+    monkeypatch.setattr(workflows, "make_research_provider", lambda runtime_settings: FailingProvider())
+    with caplog.at_level(logging.INFO, logger="clearcut.research"):
+        asyncio.run(
+            process_research_run(
+                database,
+                run.id,
+                "demo-org",
+                Settings(parallel_mode="live", agent_mode="fixture", parallel_api_key="test-key"),
+            )
+        )
+
+    with database.session_factory() as session:
+        stored_run = ResearchRunRepository(session).get(run.id, "demo-org")
+        assert stored_run is not None
+        assert stored_run.status == "failed"
+        assert stored_run.error_code == "research_workflow_failed"
+
+    failure_records = [
+        record for record in caplog.records if record.name == "clearcut.research"
+    ]
+    assert any('"exception_type": "RuntimeError"' in record.message for record in failure_records)
+    assert any('"stage": "provider_search"' in record.message for record in failure_records)
+
+
+def test_research_run_preserves_evidence_with_policy_fallback_when_agent_fails(monkeypatch) -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        project = ProjectRepository(session).create(
+            Project(
+                organization_id="demo-org", title="Agent fallback", project_type="Feature film"
+            )
+        )
+        asset = Asset(
+            organization_id="demo-org",
+            project_id=project.id,
+            document_id="document-1",
+            canonical_name="Neon Afterglow",
+            category="music",
+            context="A radio plays Neon Afterglow.",
+            source_start=0,
+            source_end=32,
+            extraction_confidence=0.9,
+            risk_status="high_risk",
+            reason_codes=["music_identified"],
+        )
+        AssetRepository(session).create_many([asset])
+        run = ResearchRunRepository(session).create(
+            ResearchRun(
+                organization_id="demo-org",
+                asset_id=asset.id,
+                provider="parallel",
+                operation="search",
+                objective="Find the rights owner.",
+                query="Neon Afterglow licensing",
+            )
+        )
+
+    class FailingAgent:
+        async def create_clearance_card(self, asset, sources):
+            del asset, sources
+            from clearcut_api.agent_runtime import AgentRuntimeError
+
+            raise AgentRuntimeError("gemini_invalid_output", "invalid model payload")
+
+    monkeypatch.setattr(workflows, "build_clearance_agent", lambda runtime_settings: FailingAgent())
+    asyncio.run(
+        process_research_run(
+            database,
+            run.id,
+            "demo-org",
+            Settings(parallel_mode="fixture", agent_mode="vertex", google_cloud_project="test"),
+        )
+    )
+
+    with database.session_factory() as session:
+        stored_run = ResearchRunRepository(session).get(run.id, "demo-org")
+        card = ClearanceCardRepository(session).get_for_run(run.id, "demo-org")
+        assert stored_run is not None
+        assert stored_run.status == "partial"
+        assert stored_run.error_code == "gemini_invalid_output"
+        assert card is not None
+        assert card.generated_by == "policy_fallback"
+        assert card.status == "pending_review"
+        assert card.evidence_count == 1
+        assert "agent_generation_failed" in card.reason_codes
 
 
 def test_multi_angle_research_session_aggregates_tasks_and_evidence() -> None:

@@ -1,8 +1,15 @@
 import asyncio
+import json
+import logging
+import time
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from .agent_runtime import AgentRuntimeError, build_clearance_agent
+from .agent_runtime import (
+    AgentRuntimeError,
+    ClearanceAgentOutput,
+    build_clearance_agent,
+)
 from .config import Settings, settings
 from .db import Database
 from .extraction import extract_candidate_assets
@@ -23,7 +30,108 @@ from .repositories import (
     ResearchSessionRepository,
     ResearchTaskRepository,
 )
+from .risk_policy import calculate_confidence, calculate_risk
 from .storage import ObjectStore
+
+research_logger = logging.getLogger("clearcut.research")
+
+
+def _log_research_event(event: str, **fields: object) -> None:
+    """Emit a searchable, secret-safe research workflow event."""
+
+    payload = {"event": event, **fields}
+    research_logger.info(json.dumps(payload, sort_keys=True, default=str))
+
+
+def _log_research_failure(
+    *,
+    workflow: str,
+    stage: str,
+    elapsed_ms: float,
+    exc: BaseException,
+    recovered: bool = False,
+    run_id: str | None = None,
+    session_id: str | None = None,
+    task_id: str | None = None,
+) -> None:
+    """Log failure metadata without logging prompts, evidence, or credentials."""
+
+    payload: dict[str, object] = {
+        "event": "research_stage_failed" if recovered else "research_workflow_failed",
+        "workflow": workflow,
+        "stage": stage,
+        "elapsed_ms": round(elapsed_ms, 2),
+        "exception_type": type(exc).__name__,
+        "error_code": getattr(exc, "code", None),
+        "recovered": recovered,
+    }
+    for name, value in (
+        ("run_id", run_id),
+        ("session_id", session_id),
+        ("task_id", task_id),
+    ):
+        if value is not None:
+            payload[name] = value
+    # Keep the traceback for Cloud Logging while avoiding potentially sensitive
+    # provider response bodies and research prompts in the message itself.
+    research_logger.exception(json.dumps(payload, sort_keys=True, default=str))
+
+
+def _research_error_code(exc: BaseException, fallback: str) -> str:
+    code = getattr(exc, "code", None)
+    return code if isinstance(code, str) and code else fallback
+
+
+def _policy_fallback_clearance_output(
+    asset: Asset, sources: list[SourceRecord], error_code: str
+) -> ClearanceAgentOutput:
+    """Keep real evidence reviewable when the model cannot format a card."""
+
+    policy = calculate_risk(asset.category, len(sources), asset.reason_codes)
+    reason_codes = list(
+        dict.fromkeys(["agent_generation_failed", error_code, *policy.reason_codes])
+    )
+    return ClearanceAgentOutput(
+        summary=(
+            f"AI clearance-card generation was unavailable for {asset.canonical_name}. "
+            f"The research workflow preserved {len(sources)} evidence source(s) for human review."
+        ),
+        recommendation=policy.recommendation,
+        risk_score=policy.risk_score,
+        confidence_score=calculate_confidence(len(sources)),
+        reason_codes=reason_codes,
+        needs_human_review=True,
+        generated_by="policy_fallback",
+        model_name=None,
+    )
+
+
+def _mark_research_run_failed(
+    database: Database, run_id: str, error_code: str
+) -> None:
+    with database.session_factory() as session:
+        ResearchRunRepository(session).update(
+            run_id, status="failed", error_code=error_code
+        )
+
+
+def _mark_research_task_failed(
+    database: Database,
+    task_id: str,
+    session_id: str,
+    organization_id: str,
+    error_code: str,
+) -> None:
+    with database.session_factory() as session:
+        tasks = ResearchTaskRepository(session)
+        tasks.update(task_id, status="failed", error_code=error_code)
+        task_list = tasks.list_for_session(session_id, organization_id)
+        ResearchSessionRepository(session).update(
+            session_id,
+            completed_tasks=sum(
+                item.status in {"completed", "partial", "failed"} for item in task_list
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -332,18 +440,76 @@ async def finalize_research_session(
             task.status in {"completed", "partial", "failed"} for task in tasks
         )
 
+    card_fallback_error: str | None = None
     if existing_card is None:
+        card_started_at = time.perf_counter()
+        _log_research_event(
+            "clearance_card_started",
+            workflow="research_session",
+            session_id=session_id,
+            run_id=run.id,
+            asset_id=asset.id,
+            evidence_count=len(stored_sources),
+        )
         try:
             card_output = await build_clearance_agent(settings).create_clearance_card(
                 asset, stored_sources
             )
         except AgentRuntimeError as exc:
+            _log_research_failure(
+                workflow="research_session",
+                stage="clearance_card",
+                elapsed_ms=(time.perf_counter() - card_started_at) * 1000,
+                exc=exc,
+                recovered=True,
+                run_id=run.id,
+                session_id=session_id,
+            )
+            card_output = _policy_fallback_clearance_output(
+                asset, stored_sources, exc.code
+            )
+            card_fallback_error = exc.code
+        except asyncio.CancelledError as exc:
+            _mark_research_run_failed(database, run.id, "research_cancelled")
             with database.session_factory() as session:
                 ResearchSessionRepository(session).update(
                     session_id, status="failed", completed_tasks=completed_tasks
                 )
-                ResearchRunRepository(session).update(run.id, status="failed", error_code=exc.code)
-            return
+            _log_research_failure(
+                workflow="research_session",
+                stage="clearance_card",
+                elapsed_ms=(time.perf_counter() - card_started_at) * 1000,
+                exc=exc,
+                run_id=run.id,
+                session_id=session_id,
+            )
+            raise
+        except Exception as exc:
+            error_code = _research_error_code(exc, "research_workflow_failed")
+            _log_research_failure(
+                workflow="research_session",
+                stage="clearance_card",
+                elapsed_ms=(time.perf_counter() - card_started_at) * 1000,
+                exc=exc,
+                recovered=True,
+                run_id=run.id,
+                session_id=session_id,
+            )
+            card_output = _policy_fallback_clearance_output(
+                asset, stored_sources, error_code
+            )
+            card_fallback_error = error_code
+
+        if card_fallback_error is not None:
+            _log_research_event(
+                "clearance_card_fallback",
+                workflow="research_session",
+                session_id=session_id,
+                run_id=run.id,
+                asset_id=asset.id,
+                error_code=card_fallback_error,
+                evidence_count=len(stored_sources),
+            )
 
         with database.session_factory() as session:
             cards = ClearanceCardRepository(session)
@@ -366,32 +532,72 @@ async def finalize_research_session(
                     )
                 )
 
+        _log_research_event(
+            "clearance_card_completed",
+            workflow="research_session",
+            session_id=session_id,
+            run_id=run.id,
+            asset_id=asset.id,
+            evidence_count=len(stored_sources),
+            elapsed_ms=round((time.perf_counter() - card_started_at) * 1000, 2),
+        )
+
     with database.session_factory() as session:
         ResearchSessionRepository(session).update(
             session_id,
-            status=session_status,
+            status="partial" if card_fallback_error is not None else session_status,
             completed_tasks=completed_tasks,
             findings=aggregate_findings,
         )
-        ResearchRunRepository(session).update(run.id, status=session_status)
+        ResearchRunRepository(session).update(
+            run.id,
+            status="partial" if card_fallback_error is not None else session_status,
+            error_code=card_fallback_error,
+        )
 
 
 async def process_research_task(
     database: Database, task_id: str, organization_id: str, settings: Settings
 ) -> None:
+    started_at = time.perf_counter()
+    session_id: str | None = None
+    run_id: str | None = None
+    current_stage = "load_records"
     with database.session_factory() as session:
         tasks = ResearchTaskRepository(session)
         task = tasks.get(task_id, organization_id)
         if task is None or task.status in {"completed", "partial"}:
+            _log_research_event(
+                "research_task_skipped",
+                workflow="research_task",
+                task_id=task_id,
+                reason="missing_or_terminal",
+            )
             return
         research_session = ResearchSessionRepository(session).get(task.session_id, organization_id)
         run = ResearchRunRepository(session).get(task.research_run_id, organization_id)
         if research_session is None or run is None:
             tasks.update(task_id, status="failed", error_code="research_session_not_found")
+            _log_research_event(
+                "research_task_failed",
+                workflow="research_task",
+                task_id=task_id,
+                error_code="research_session_not_found",
+                stage="load_records",
+            )
             return
         asset = AssetRepository(session).get(research_session.asset_id, organization_id)
         if asset is None:
             tasks.update(task_id, status="failed", error_code="asset_not_found")
+            _log_research_event(
+                "research_task_failed",
+                workflow="research_task",
+                task_id=task_id,
+                session_id=research_session.id,
+                run_id=run.id,
+                error_code="asset_not_found",
+                stage="load_records",
+            )
             return
         tasks.update(task_id, status="running", error_code=None)
         ResearchSessionRepository(session).update(task.session_id, status="running")
@@ -401,22 +607,86 @@ async def process_research_task(
         session_id = task.session_id
         run_id = run.id
 
+    _log_research_event(
+        "research_task_started",
+        workflow="research_task",
+        task_id=task_id,
+        session_id=session_id,
+        run_id=run_id,
+        asset_id=asset.id,
+        angle=task.angle,
+    )
+
     try:
+        current_stage = "provider_search"
         provider = make_research_provider(settings)
         provider_session_id = f"clearcut:{session_id}"
+        _log_research_event(
+            "provider_search_started",
+            workflow="research_task",
+            task_id=task_id,
+            session_id=session_id,
+            run_id=run_id,
+        )
         search_results = await provider.search(
             query, objective=objective, session_id=provider_session_id
         )
+        _log_research_event(
+            "provider_search_completed",
+            workflow="research_task",
+            task_id=task_id,
+            session_id=session_id,
+            run_id=run_id,
+            result_count=len(search_results),
+            provider_request_id=search_results[0].request_id if search_results else None,
+        )
         results = []
-        for result in search_results[:3]:
+        for index, result in enumerate(search_results[:3], start=1):
+            current_stage = "provider_extract"
             try:
+                _log_research_event(
+                    "provider_extract_started",
+                    workflow="research_task",
+                    task_id=task_id,
+                    session_id=session_id,
+                    run_id=run_id,
+                    source_index=index,
+                )
                 extracted = await provider.extract(
                     result.url, objective=objective, session_id=provider_session_id
                 )
-            except ParallelProviderError:
+                _log_research_event(
+                    "provider_extract_completed",
+                    workflow="research_task",
+                    task_id=task_id,
+                    session_id=session_id,
+                    run_id=run_id,
+                    source_index=index,
+                    has_excerpt=bool(extracted.excerpt),
+                )
+            except ParallelProviderError as exc:
+                _log_research_failure(
+                    workflow="research_task",
+                    stage="provider_extract",
+                    elapsed_ms=(time.perf_counter() - started_at) * 1000,
+                    exc=exc,
+                    recovered=True,
+                    run_id=run_id,
+                    session_id=session_id,
+                    task_id=task_id,
+                )
+                _log_research_event(
+                    "provider_extract_fallback",
+                    workflow="research_task",
+                    task_id=task_id,
+                    session_id=session_id,
+                    run_id=run_id,
+                    source_index=index,
+                )
                 extracted = result
             results.append(extracted if extracted.excerpt else result)
 
+        current_stage = "persist_sources"
         with database.session_factory() as session:
             runs = ResearchRunRepository(session)
             sources = [
@@ -452,13 +722,23 @@ async def process_research_task(
             ResearchSessionRepository(session).update(
                 session_id, completed_tasks=completed_tasks
             )
+        _log_research_event(
+            "research_task_completed",
+            workflow="research_task",
+            task_id=task_id,
+            session_id=session_id,
+            run_id=run_id,
+            source_count=len(sources),
+            elapsed_ms=round((time.perf_counter() - started_at) * 1000, 2),
+        )
         await finalize_research_session(database, session_id, organization_id, settings)
     except ParallelProviderError as exc:
+        _mark_research_task_failed(
+            database, task_id, session_id, organization_id, exc.code
+        )
         with database.session_factory() as session:
             ResearchTaskRepository(session).update(
                 task_id,
-                status="failed",
-                error_code=exc.code,
                 gap_codes=["provider_error", "retry_recommended"],
                 findings=[
                     {
@@ -466,54 +746,159 @@ async def process_research_task(
                         "kind": "gap",
                         "severity": "high",
                         "title": "Provider request failed",
-                        "detail": str(exc),
+                        "detail": "The configured research provider could not complete this request.",
                         "action": "Retry this angle after checking provider availability.",
                     }
                 ],
             )
-            tasks = ResearchTaskRepository(session).list_for_session(session_id, organization_id)
-            ResearchSessionRepository(session).update(
-                session_id,
-                completed_tasks=sum(
-                    item.status in {"completed", "partial", "failed"} for item in tasks
-                ),
-            )
+        _log_research_failure(
+            workflow="research_task",
+            stage=current_stage,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000,
+            exc=exc,
+            run_id=run_id,
+            session_id=session_id,
+            task_id=task_id,
+        )
         await finalize_research_session(database, session_id, organization_id, settings)
+    except asyncio.CancelledError as exc:
+        if session_id is not None and run_id is not None:
+            _mark_research_task_failed(
+                database, task_id, session_id, organization_id, "research_cancelled"
+            )
+        _log_research_failure(
+            workflow="research_task",
+            stage=current_stage,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000,
+            exc=exc,
+            run_id=run_id,
+            session_id=session_id,
+            task_id=task_id,
+        )
+        raise
+    except Exception as exc:
+        error_code = _research_error_code(exc, "research_workflow_failed")
+        if session_id is not None and run_id is not None:
+            _mark_research_task_failed(
+                database, task_id, session_id, organization_id, error_code
+            )
+        _log_research_failure(
+            workflow="research_task",
+            stage=current_stage,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000,
+            exc=exc,
+            run_id=run_id,
+            session_id=session_id,
+            task_id=task_id,
+        )
+        if session_id is not None:
+            await finalize_research_session(database, session_id, organization_id, settings)
 
 
 async def process_research_run(
     database: Database, run_id: str, organization_id: str, settings: Settings
 ) -> None:
+    started_at = time.perf_counter()
+    asset_id: str | None = None
+    current_stage = "load_records"
     with database.session_factory() as session:
         runs = ResearchRunRepository(session)
         assets = AssetRepository(session)
         run = runs.get(run_id, organization_id)
         if run is None:
+            _log_research_event(
+                "research_run_skipped",
+                workflow="research_run",
+                run_id=run_id,
+                reason="missing",
+            )
             return
         asset = assets.get(run.asset_id, organization_id)
         if asset is None:
             runs.update(run_id, status="failed", error_code="asset_not_found")
+            _log_research_event(
+                "research_run_failed",
+                workflow="research_run",
+                run_id=run_id,
+                error_code="asset_not_found",
+                stage="load_records",
+            )
             return
         runs.update(run_id, status="running")
         query = run.query
         objective = run.objective
         asset_id = asset.id
 
+    _log_research_event(
+        "research_run_started",
+        workflow="research_run",
+        run_id=run_id,
+        organization_id=organization_id,
+        asset_id=asset_id,
+    )
+
     try:
+        current_stage = "provider_search"
         provider = make_research_provider(settings)
         provider_session_id = f"clearcut:{run_id}"
+        _log_research_event(
+            "provider_search_started",
+            workflow="research_run",
+            run_id=run_id,
+            asset_id=asset_id,
+        )
         search_results = await provider.search(
             query, objective=objective, session_id=provider_session_id
         )
+        _log_research_event(
+            "provider_search_completed",
+            workflow="research_run",
+            run_id=run_id,
+            asset_id=asset_id,
+            result_count=len(search_results),
+            provider_request_id=search_results[0].request_id if search_results else None,
+        )
         results = []
-        for result in search_results[:3]:
+        for index, result in enumerate(search_results[:3], start=1):
+            current_stage = "provider_extract"
             try:
+                _log_research_event(
+                    "provider_extract_started",
+                    workflow="research_run",
+                    run_id=run_id,
+                    asset_id=asset_id,
+                    source_index=index,
+                )
                 extracted = await provider.extract(
                     result.url, objective=objective, session_id=provider_session_id
                 )
-            except ParallelProviderError:
+                _log_research_event(
+                    "provider_extract_completed",
+                    workflow="research_run",
+                    run_id=run_id,
+                    asset_id=asset_id,
+                    source_index=index,
+                    has_excerpt=bool(extracted.excerpt),
+                )
+            except ParallelProviderError as exc:
+                _log_research_failure(
+                    workflow="research_run",
+                    stage="provider_extract",
+                    elapsed_ms=(time.perf_counter() - started_at) * 1000,
+                    exc=exc,
+                    recovered=True,
+                    run_id=run_id,
+                )
+                _log_research_event(
+                    "provider_extract_fallback",
+                    workflow="research_run",
+                    run_id=run_id,
+                    asset_id=asset_id,
+                    source_index=index,
+                )
                 extracted = result
             results.append(extracted if extracted.excerpt else result)
+        current_stage = "persist_sources"
         with database.session_factory() as session:
             runs = ResearchRunRepository(session)
             sources = [
@@ -539,16 +924,77 @@ async def process_research_run(
             asset = AssetRepository(session).get(asset_id, organization_id)
             stored_sources = runs.list_sources(run_id)
         if asset is None:
+            _mark_research_run_failed(database, run_id, "asset_not_found")
+            _log_research_event(
+                "research_run_failed",
+                workflow="research_run",
+                run_id=run_id,
+                error_code="asset_not_found",
+                stage="persist_sources",
+            )
             return
 
+        current_stage = "clearance_card"
+        card_started_at = time.perf_counter()
+        _log_research_event(
+            "clearance_card_started",
+            workflow="research_run",
+            run_id=run_id,
+            asset_id=asset_id,
+            evidence_count=len(stored_sources),
+        )
+        card_fallback_error: str | None = None
         try:
             card_output = await build_clearance_agent(settings).create_clearance_card(
                 asset, stored_sources
             )
         except AgentRuntimeError as exc:
-            with database.session_factory() as session:
-                ResearchRunRepository(session).update(run_id, status="failed", error_code=exc.code)
-            return
+            _log_research_failure(
+                workflow="research_run",
+                stage="clearance_card",
+                elapsed_ms=(time.perf_counter() - card_started_at) * 1000,
+                exc=exc,
+                recovered=True,
+                run_id=run_id,
+            )
+            card_output = _policy_fallback_clearance_output(
+                asset, stored_sources, exc.code
+            )
+            card_fallback_error = exc.code
+        except asyncio.CancelledError as exc:
+            _mark_research_run_failed(database, run_id, "research_cancelled")
+            _log_research_failure(
+                workflow="research_run",
+                stage="clearance_card",
+                elapsed_ms=(time.perf_counter() - card_started_at) * 1000,
+                exc=exc,
+                run_id=run_id,
+            )
+            raise
+        except Exception as exc:
+            error_code = _research_error_code(exc, "research_workflow_failed")
+            _log_research_failure(
+                workflow="research_run",
+                stage="clearance_card",
+                elapsed_ms=(time.perf_counter() - card_started_at) * 1000,
+                exc=exc,
+                recovered=True,
+                run_id=run_id,
+            )
+            card_output = _policy_fallback_clearance_output(
+                asset, stored_sources, error_code
+            )
+            card_fallback_error = error_code
+
+        if card_fallback_error is not None:
+            _log_research_event(
+                "clearance_card_fallback",
+                workflow="research_run",
+                run_id=run_id,
+                asset_id=asset_id,
+                error_code=card_fallback_error,
+                evidence_count=len(stored_sources),
+            )
 
         with database.session_factory() as session:
             cards = ClearanceCardRepository(session)
@@ -572,9 +1018,61 @@ async def process_research_run(
                 )
             ResearchRunRepository(session).update(
                 run_id,
-                status="completed" if stored_sources else "partial",
+                status=(
+                    "partial"
+                    if card_fallback_error is not None or not stored_sources
+                    else "completed"
+                ),
                 provider_request_id=request_id,
+                error_code=card_fallback_error,
             )
+        _log_research_event(
+            "clearance_card_completed",
+            workflow="research_run",
+            run_id=run_id,
+            asset_id=asset_id,
+            evidence_count=len(stored_sources),
+            elapsed_ms=round((time.perf_counter() - card_started_at) * 1000, 2),
+        )
+        _log_research_event(
+            "research_run_completed",
+            workflow="research_run",
+            run_id=run_id,
+            asset_id=asset_id,
+            status=(
+                "partial"
+                if card_fallback_error is not None or not stored_sources
+                else "completed"
+            ),
+            evidence_count=len(stored_sources),
+            elapsed_ms=round((time.perf_counter() - started_at) * 1000, 2),
+        )
     except ParallelProviderError as exc:
-        with database.session_factory() as session:
-            ResearchRunRepository(session).update(run_id, status="failed", error_code=exc.code)
+        _mark_research_run_failed(database, run_id, exc.code)
+        _log_research_failure(
+            workflow="research_run",
+            stage=current_stage,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000,
+            exc=exc,
+            run_id=run_id,
+        )
+    except asyncio.CancelledError as exc:
+        _mark_research_run_failed(database, run_id, "research_cancelled")
+        _log_research_failure(
+            workflow="research_run",
+            stage=current_stage,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000,
+            exc=exc,
+            run_id=run_id,
+        )
+        raise
+    except Exception as exc:
+        error_code = _research_error_code(exc, "research_workflow_failed")
+        _mark_research_run_failed(database, run_id, error_code)
+        _log_research_failure(
+            workflow="research_run",
+            stage=current_stage,
+            elapsed_ms=(time.perf_counter() - started_at) * 1000,
+            exc=exc,
+            run_id=run_id,
+        )
