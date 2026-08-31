@@ -59,6 +59,7 @@ export function RightsInventory({ projectId }: RightsInventoryProps) {
   const [status, setStatus] = useState("all");
   const [selected, setSelected] = useState<Asset | null>(null);
   const [comment, setComment] = useState("");
+  const [mentionActorId, setMentionActorId] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [scheduling, setScheduling] = useState(false);
@@ -108,6 +109,7 @@ export function RightsInventory({ projectId }: RightsInventoryProps) {
     return matchesQuery && matchesCategory && matchesStatus;
   });
   const selectedCard = selected ? latestCards.get(selected.id) : undefined;
+  const memberLabel = (actorId: string) => members.find((member) => member.actor_id === actorId)?.display_name ?? actorId;
 
   useEffect(() => {
     if (!selected) {
@@ -150,6 +152,7 @@ export function RightsInventory({ projectId }: RightsInventoryProps) {
       setAssets((current) => current.map((asset) => asset.id === updated.id ? updated : asset));
       setSelected(updated);
       setMessage("Asset accountability saved.");
+      window.dispatchEvent(new Event("clearcut:notifications-updated"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save asset accountability.");
     } finally {
@@ -164,12 +167,14 @@ export function RightsInventory({ projectId }: RightsInventoryProps) {
       const response = await fetch(`${apiUrl}/v1/assets/${selected.id}/comments`, {
         method: "POST",
         headers: { ...headers, "content-type": "application/json", "x-actor-id": "demo-producer" },
-        body: JSON.stringify({ body: comment.trim(), mention_ids: [] }),
+        body: JSON.stringify({ body: comment.trim(), mention_ids: mentionActorId ? [mentionActorId] : [] }),
       });
       if (!response.ok) throw new Error("Unable to add the comment.");
       const created = await response.json() as Comment;
       setComments((current) => [...current, created]);
       setComment("");
+      setMentionActorId("");
+      window.dispatchEvent(new Event("clearcut:notifications-updated"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to add the comment.");
     } finally {
@@ -211,7 +216,7 @@ export function RightsInventory({ projectId }: RightsInventoryProps) {
         {selectedCard ? <><div className="drawer-section"><span className="drawer-label">Clearance assessment</span><div className="drawer-score-grid"><div><strong>{selectedCard.risk_score}</strong><small>risk / 100</small></div><div><strong>{Math.round(selectedCard.confidence_score * 100)}%</strong><small>confidence</small></div><div><strong>{selectedCard.evidence_count}</strong><small>sources</small></div></div><p>{selectedCard.summary}</p><div className="recommendation"><span>Next action</span><p>{selectedCard.recommendation}</p></div></div><div className="drawer-section"><span className="drawer-label">Evidence</span>{sources.length ? <div className="drawer-sources">{sources.map((source) => <a href={source.url} key={source.id} rel="noreferrer" target="_blank"><strong>{source.title}</strong><small>{source.source_quality} · {source.excerpt}</small></a>)}</div> : <p className="drawer-muted">No source records available.</p>}</div><div className="drawer-section"><span className="drawer-label">Reason codes</span><div className="reason-codes">{selectedCard.reason_codes.map((code) => <span key={code}>{label(code)}</span>)}</div></div></> : <div className="drawer-empty">Research this asset to create an evidence-backed clearance card.</div>}
         {playbook ? <div className="drawer-section"><span className="drawer-label">Rights playbook</span><details className="playbook-details" open><summary>Category-specific clearance checklist</summary><div className="playbook-block"><strong>Required evidence</strong>{playbook.required_evidence.map((item) => <span key={item}>• {item}</span>)}</div><div className="playbook-block"><strong>Escalation signals</strong>{playbook.escalation_signals.map((item) => <span key={item}>• {item}</span>)}</div></details></div> : null}
         <div className="drawer-section"><div className="drawer-label-row"><span className="drawer-label">Evidence recheck</span>{recheck ? <span className="schedule-active">Every {recheck.cadence_days} days</span> : null}</div><p className="drawer-muted">{recheck ? `Next scheduled check ${dateLabel(recheck.next_run_at)}.` : "Keep rights evidence fresh before delivery."}</p><button className="secondary-button" disabled={scheduling} onClick={() => void scheduleRecheck()} type="button">{scheduling ? "Scheduling…" : recheck ? "Update recheck schedule" : "Schedule 30-day recheck"}</button></div>
-        <div className="drawer-section"><span className="drawer-label">Team comments</span><div className="comment-list">{comments.map((item) => <div className="comment-row" key={item.id}><strong>{item.author_id}</strong><small>{dateLabel(item.created_at)}</small><p>{item.body}</p></div>)}{!comments.length ? <p className="drawer-muted">No internal comments yet.</p> : null}</div><div className="comment-compose"><textarea aria-label="Add internal comment" onChange={(event) => setComment(event.target.value)} placeholder="Add an internal note or next step…" value={comment} /><button className="secondary-button" disabled={busy || !comment.trim()} onClick={() => void addComment()} type="button">Add comment</button></div></div>
+        <div className="drawer-section"><span className="drawer-label">Team comments</span><div className="comment-list">{comments.map((item) => <div className="comment-row" key={item.id}><strong>{memberLabel(item.author_id)}</strong><small>{dateLabel(item.created_at)}</small><p>{item.body}</p>{item.mention_ids.length ? <small className="comment-mentions">Mentioned {item.mention_ids.map((actorId) => `@${memberLabel(actorId)}`).join(", ")}</small> : null}</div>)}{!comments.length ? <p className="drawer-muted">No internal comments yet.</p> : null}</div><div className="comment-compose"><textarea aria-label="Add internal comment" onChange={(event) => setComment(event.target.value)} placeholder="Add an internal note or next step…" value={comment} /><div className="comment-compose-actions"><select aria-label="Mention a teammate" onChange={(event) => setMentionActorId(event.target.value)} value={mentionActorId}><option value="">No mention</option>{members.map((member) => <option key={member.actor_id} value={member.actor_id}>Mention {member.display_name}</option>)}</select><button className="secondary-button" disabled={busy || !comment.trim()} onClick={() => void addComment()} type="button">Add comment</button></div></div></div>
         <div className="drawer-footer"><button className="secondary-button" onClick={() => { setSelected(null); document.getElementById("review-queue")?.scrollIntoView({ behavior: "smooth" }); }} type="button">Open review queue</button></div>
       </aside></div> : null}
     </>

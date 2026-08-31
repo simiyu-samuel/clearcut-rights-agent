@@ -10,6 +10,7 @@ export function NewProjectForm() {
   const [projectType, setProjectType] = useState("Feature film");
   const [territories, setTerritories] = useState("Kenya, United Kingdom");
   const [distributionModes, setDistributionModes] = useState("Streaming");
+  const [targetReleaseAt, setTargetReleaseAt] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -27,6 +28,7 @@ export function NewProjectForm() {
           project_type: projectType,
           territories: territories.split(",").map((value) => value.trim()).filter(Boolean),
           distribution_modes: distributionModes.split(",").map((value) => value.trim()).filter(Boolean),
+          target_release_at: targetReleaseAt ? `${targetReleaseAt}T23:59:59Z` : null,
         }),
       });
       if (!response.ok) {
@@ -49,6 +51,7 @@ export function NewProjectForm() {
         <label className="form-field"><span>Project type</span><input required value={projectType} onChange={(event) => setProjectType(event.target.value)} /></label>
         <label className="form-field"><span>Territories</span><input value={territories} onChange={(event) => setTerritories(event.target.value)} /></label>
         <label className="form-field"><span>Distribution modes</span><input value={distributionModes} onChange={(event) => setDistributionModes(event.target.value)} /></label>
+        <label className="form-field"><span>Target release date <small>Optional</small></span><input type="date" value={targetReleaseAt} onChange={(event) => setTargetReleaseAt(event.target.value)} /></label>
         {message ? <div className="form-message" role="status">{message}</div> : null}
         <div className="form-actions"><button className="primary-button" disabled={busy} type="submit">{busy ? "Creating…" : "Create project"}</button></div>
       </div>

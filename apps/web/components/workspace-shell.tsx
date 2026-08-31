@@ -4,7 +4,11 @@ import Link from "next/link";
 import type { Route } from "next";
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { authorizedFetch as fetch } from "@/lib/api-client";
+import type { Project } from "@/lib/types";
 
 type WorkspaceShellProps = {
   children: ReactNode;
@@ -33,7 +37,12 @@ function Icon({ name, filled = false }: { name: IconName; filled?: boolean }) {
 
 export function WorkspaceShell({ children, breadcrumbs, active, projectId }: WorkspaceShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const auth = useAuth();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchProjects, setSearchProjects] = useState<Project[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const currentMembership = auth.memberships.find(
     (membership) => membership.organization_id === auth.organizationId,
   );
@@ -45,6 +54,45 @@ export function WorkspaceShell({ children, breadcrumbs, active, projectId }: Wor
     .toUpperCase();
   const workspaceName = currentMembership?.organization_name
     ?? (auth.organizationId === "demo-org" ? "Studio Meridian" : "Workspace");
+  useEffect(() => {
+    if (auth.status !== "authenticated") return;
+    let activeRequest = true;
+    const loadProjects = async () => {
+      try {
+        const response = await fetch("/v1/projects", { cache: "no-store" });
+        if (response.ok && activeRequest) setSearchProjects(await response.json() as Project[]);
+      } catch {
+        if (activeRequest) setSearchProjects([]);
+      }
+    };
+    void loadProjects();
+    return () => { activeRequest = false; };
+  }, [auth.organizationId, auth.status]);
+  useEffect(() => {
+    if (auth.status !== "authenticated") return;
+    let activeRequest = true;
+    const loadNotifications = async () => {
+      try {
+        const response = await fetch("/v1/notifications", { cache: "no-store" });
+        if (response.ok && activeRequest) {
+          const notifications = await response.json() as Array<{ read_at: string | null }>;
+          setUnreadCount(notifications.filter((notification) => !notification.read_at).length);
+        }
+      } catch {
+        if (activeRequest) setUnreadCount(0);
+      }
+    };
+    void loadNotifications();
+    const refresh = () => void loadNotifications();
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener("clearcut:notifications-updated", refresh);
+    return () => { activeRequest = false; window.clearInterval(interval); window.removeEventListener("clearcut:notifications-updated", refresh); };
+  }, [auth.organizationId, auth.status]);
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return searchProjects.slice(0, 6);
+    return searchProjects.filter((project) => `${project.title} ${project.project_type} ${project.territories.join(" ")} ${project.distribution_modes.join(" ")}`.toLowerCase().includes(query)).slice(0, 6);
+  }, [searchProjects, searchQuery]);
   const projectReviewActive = Boolean(projectId && pathname.includes(`/projects/${projectId}/review`));
   const navItems: Array<{ key: NonNullable<WorkspaceShellProps["active"]>; label: string; href: Route; icon: IconName }> = [
     { key: "overview", label: "Overview", href: "/" as Route, icon: "dashboard" },
@@ -78,7 +126,7 @@ export function WorkspaceShell({ children, breadcrumbs, active, projectId }: Wor
         </div>
       </aside>
       <main className="main">
-        <header className="topbar"><div className="breadcrumbs">{breadcrumbs}</div><div className="topbar-search"><Icon name="research" /><input aria-label="Search workspace" placeholder="Search projects, assets, evidence…" /></div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />{process.env.NEXT_PUBLIC_AUTH_MODE === "identity_platform" ? "Workspace healthy" : "Local demo mode"}</div><Link className="icon-button" aria-label="Open activity and notifications" href="/activity"><Icon name="notifications" /><span className="notification-dot" /></Link><div className="topbar-avatar avatar">{initials}</div></div></header>
+        <header className="topbar"><div className="breadcrumbs">{breadcrumbs}</div><div className="topbar-search-wrap"><div className="topbar-search"><Icon name="research" /><input aria-controls="workspace-search-results" aria-expanded={searchOpen} aria-label="Search workspace" onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)} onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true); }} onFocus={() => setSearchOpen(true)} onKeyDown={(event) => { if (event.key === "Escape") { setSearchOpen(false); event.currentTarget.blur(); } if (event.key === "Enter" && searchResults[0]) { router.push(`/projects/${searchResults[0].id}` as Route); setSearchOpen(false); } }} placeholder="Search projects, assets, evidence…" value={searchQuery} /></div>{searchOpen ? <div className="workspace-search-results" id="workspace-search-results" role="listbox">{searchResults.length ? searchResults.map((project) => <Link className="workspace-search-result" href={`/projects/${project.id}` as Route} key={project.id} onClick={() => { setSearchOpen(false); setSearchQuery(""); }} role="option"><span className="search-result-icon"><Icon name="folder" /></span><span><strong>{project.title}</strong><small>{project.project_type} · <span className={`status-text ${project.status}`}>{project.status.replaceAll("_", " ")}</span></small></span><b>→</b></Link>) : <div className="workspace-search-empty">No projects match “{searchQuery}”.</div>}</div> : null}</div><div className="topbar-actions"><div className="env-pill"><span className="env-dot" />{process.env.NEXT_PUBLIC_AUTH_MODE === "identity_platform" ? "Workspace healthy" : "Local demo mode"}</div><Link className="icon-button" aria-label={unreadCount ? `${unreadCount} unread notifications` : "Open activity and notifications"} href="/activity"><Icon name="notifications" />{unreadCount ? <span className="notification-badge">{unreadCount > 9 ? "9+" : unreadCount}</span> : null}</Link><div className="topbar-avatar avatar">{initials}</div></div></header>
         <div className="content">{children}</div>
       </main>
     </div>

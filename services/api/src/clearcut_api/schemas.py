@@ -44,6 +44,14 @@ class ProjectCreate(BaseModel):
     target_release_at: datetime | None = None
 
 
+class ProjectUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    project_type: str | None = Field(default=None, min_length=1, max_length=80)
+    territories: list[str] | None = Field(default=None, max_length=20)
+    distribution_modes: list[str] | None = Field(default=None, max_length=10)
+    target_release_at: datetime | None = None
+
+
 class ProjectRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

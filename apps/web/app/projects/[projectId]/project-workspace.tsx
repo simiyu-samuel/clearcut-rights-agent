@@ -86,7 +86,7 @@ export function ProjectWorkspace({ projectId, section }: ProjectWorkspaceProps) 
       {section === "requests" ? <ReviewQueue projectId={project.id} mode="requests" /> : null}
       {section === "reports" ? <ReportsPanel projectId={project.id} /> : null}
       {section === "activity" ? <ProjectActivity projectId={project.id} /> : null}
-      {section === "settings" ? <ProjectSettings project={project} /> : null}
+      {section === "settings" ? <ProjectSettings project={project} onSaved={setProject} /> : null}
     </div>
   </WorkspaceShell>;
 }

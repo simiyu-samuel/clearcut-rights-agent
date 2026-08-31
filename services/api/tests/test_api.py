@@ -44,6 +44,7 @@ def test_system_routes_are_registered() -> None:
         "/v1/organizations/current/invitations",
         "/v1/organizations/current/invitations/{invitation_id}/revoke",
         "/v1/projects/{project_id}/approvals",
+        "/v1/projects/{project_id}",
         "/v1/assets/{asset_id}/approvals",
         "/v1/projects/{project_id}/delivery-readiness",
         "/v1/projects/{project_id}/activity",
@@ -141,6 +142,10 @@ def test_project_lifecycle_and_tenant_scope() -> None:
         assert repository.list("studio-a")[0].id == created.id
         assert repository.list("studio-b") == []
         assert repository.get(created.id, "studio-b") is None
+        target_release = datetime(2026, 12, 1, tzinfo=UTC)
+        updated = repository.update(created.id, "studio-a", target_release_at=target_release)
+        assert updated is not None
+        assert as_utc(updated.target_release_at) == target_release
 
 
 def test_analysis_run_is_queued_for_async_processing() -> None:

@@ -177,7 +177,10 @@ export function ActivityViewer() {
 
   async function markRead(notificationId: string) {
     const response = await fetch(`${apiUrl}/v1/notifications/${notificationId}/read`, { method: "POST" });
-    if (response.ok) setNotifications((current) => current.map((notification) => notification.id === notificationId ? { ...notification, read_at: new Date().toISOString() } : notification));
+    if (response.ok) {
+      setNotifications((current) => current.map((notification) => notification.id === notificationId ? { ...notification, read_at: new Date().toISOString() } : notification));
+      window.dispatchEvent(new Event("clearcut:notifications-updated"));
+    }
   }
 
   const filteredActivity = useMemo(() => {

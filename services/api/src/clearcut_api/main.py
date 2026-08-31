@@ -116,6 +116,7 @@ from .schemas import (
     ProjectAttachmentRead,
     ProjectCreate,
     ProjectRead,
+    ProjectUpdate,
     ResearchFollowUpCreate,
     ResearchRecheckCreate,
     ResearchRecheckRead,
@@ -652,6 +653,35 @@ def create_app(
         organization_id: str = Depends(get_organization_id),
     ) -> list[Project]:
         return ProjectRepository(session).list(organization_id)
+
+    @app.patch("/v1/projects/{project_id}", response_model=ProjectRead, tags=["projects"])
+    def update_project(
+        project_id: str,
+        payload: ProjectUpdate,
+        x_actor_id: str | None = Depends(get_actor_id),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> Project:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer", "coordinator"})
+        values = payload.model_dump(exclude_unset=True)
+        project = ProjectRepository(session).update(project_id, organization_id, **values)
+        if project is None:
+            raise HTTPException(status_code=404, detail="project_not_found")
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="project.updated",
+                resource_type="project",
+                resource_id=project_id,
+                metadata_json=json.dumps(values, default=str),
+            )
+        )
+        session.commit()
+        session.refresh(project)
+        return project
 
     @app.get(
         "/v1/organizations/current",
@@ -1361,6 +1391,10 @@ def create_app(
             {"admin", "producer", "coordinator", "legal_reviewer"},
         )
         values = payload.model_dump(exclude_unset=True)
+        asset_before_update = AssetRepository(session).get(asset_id, organization_id)
+        if asset_before_update is None:
+            raise HTTPException(status_code=404, detail="asset_not_found")
+        previous_owner_id = asset_before_update.owner_id
         asset = AssetRepository(session).update(asset_id, organization_id, **values)
         if asset is None:
             raise HTTPException(status_code=404, detail="asset_not_found")
@@ -1377,7 +1411,8 @@ def create_app(
         )
         session.commit()
         session.refresh(asset)
-        if asset.owner_id and asset.owner_id != actor_id:
+        owner_changed = "owner_id" in values and values["owner_id"] != previous_owner_id
+        if owner_changed and asset.owner_id and asset.owner_id != actor_id:
             session.add(
                 Notification(
                     organization_id=organization_id,

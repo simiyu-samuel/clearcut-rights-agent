@@ -154,6 +154,16 @@ class ProjectRepository:
         project = self.session.scalar(statement)
         return self.sync_status(project) if project is not None else None
 
+    def update(self, project_id: str, organization_id: str, **values: object) -> Project | None:
+        project = self.get(project_id, organization_id)
+        if project is None:
+            return None
+        for key, value in values.items():
+            setattr(project, key, value)
+        self.session.commit()
+        self.session.refresh(project)
+        return project
+
     def sync_status(self, project: Project) -> Project:
         asset_ids = set(
             self.session.scalars(
