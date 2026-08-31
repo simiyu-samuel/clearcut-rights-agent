@@ -15,6 +15,7 @@ from .models import (
     Notification,
     Organization,
     OrganizationInvitation,
+    OrganizationOption,
     OutreachDraft,
     Project,
     ProjectAttachment,
@@ -126,6 +127,35 @@ class OrganizationInvitationRepository:
         self.session.commit()
         self.session.refresh(invitation)
         return invitation
+
+
+class OrganizationOptionRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def list_for_organization(self, organization_id: str) -> list[OrganizationOption]:
+        statement = (
+            select(OrganizationOption)
+            .where(OrganizationOption.organization_id == organization_id)
+            .order_by(OrganizationOption.option_type.asc(), OrganizationOption.label.asc())
+        )
+        return list(self.session.scalars(statement))
+
+    def get_by_normalized_label(
+        self, organization_id: str, option_type: str, normalized_label: str
+    ) -> OrganizationOption | None:
+        statement = select(OrganizationOption).where(
+            OrganizationOption.organization_id == organization_id,
+            OrganizationOption.option_type == option_type,
+            OrganizationOption.normalized_label == normalized_label,
+        )
+        return self.session.scalar(statement)
+
+    def create(self, option: OrganizationOption) -> OrganizationOption:
+        self.session.add(option)
+        self.session.commit()
+        self.session.refresh(option)
+        return option
 
 
 class ProjectRepository:

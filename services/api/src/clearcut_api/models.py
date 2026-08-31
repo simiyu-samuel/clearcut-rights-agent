@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -57,6 +57,26 @@ class OrganizationInvitation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class OrganizationOption(Base):
+    __tablename__ = "organization_options"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "option_type",
+            "normalized_label",
+            name="uq_organization_options_label",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(120), index=True)
+    option_type: Mapped[str] = mapped_column(String(40), index=True)
+    label: Mapped[str] = mapped_column(String(120))
+    normalized_label: Mapped[str] = mapped_column(String(120))
+    created_by_actor_id: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class Project(Base):

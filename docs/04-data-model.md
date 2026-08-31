@@ -16,6 +16,15 @@ Represents a studio, production company, agency, or legal team.
 
 Key fields: `id`, `name`, `slug`, `default_policy_id`, `created_at`.
 
+### Organization option
+
+A workspace-managed project metadata suggestion, such as a custom project type, territory, or
+distribution mode. Built-in suggestions are always available; custom options are scoped to one
+organization and are available to authorized producers and admins when creating or editing projects.
+
+Key fields: `id`, `organization_id`, `option_type`, `label`, `normalized_label`, `created_by_actor_id`,
+`created_at`.
+
 ### User and membership
 
 Users belong to organizations through memberships with roles such as `owner`, `producer`, `clearance_coordinator`, `legal_reviewer`, and `viewer`.
@@ -111,6 +120,7 @@ Key fields: `id`, `organization_id`, `actor_type`, `actor_id`, `action`, `resour
 ```mermaid
 erDiagram
     ORGANIZATION ||--o{ MEMBERSHIP : has
+    ORGANIZATION ||--o{ ORGANIZATION_OPTION : configures
     ORGANIZATION ||--o{ PROJECT : owns
     PROJECT ||--o{ SOURCE_DOCUMENT : contains
     SOURCE_DOCUMENT ||--o{ SCENE : contains

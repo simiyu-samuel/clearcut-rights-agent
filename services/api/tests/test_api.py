@@ -14,12 +14,14 @@ from clearcut_api.models import (
     ClearanceCard,
     Job,
     OrganizationInvitation,
+    OrganizationOption,
     Project,
 )
 from clearcut_api.repositories import (
     ApprovalRepository,
     JobRepository,
     OrganizationInvitationRepository,
+    OrganizationOptionRepository,
     ProjectRepository,
 )
 
@@ -42,6 +44,7 @@ def test_system_routes_are_registered() -> None:
         "/v1/auth/me",
         "/v1/organizations",
         "/v1/organizations/current/invitations",
+        "/v1/organizations/current/project-options",
         "/v1/organizations/current/invitations/{invitation_id}/revoke",
         "/v1/projects/{project_id}/approvals",
         "/v1/projects/{project_id}",
@@ -61,6 +64,27 @@ def test_system_routes_are_registered() -> None:
         "/v1/research-rechecks/run-due",
     }.issubset(routes)
     assert app.title == "ClearCut API"
+
+
+def test_project_option_repository_is_tenant_scoped_and_case_normalized() -> None:
+    database = make_database()
+    with database.session_factory() as session:
+        repository = OrganizationOptionRepository(session)
+        created = repository.create(
+            OrganizationOption(
+                organization_id="studio-a",
+                option_type="distribution_mode",
+                label="Limited theatrical",
+                normalized_label="limited theatrical",
+                created_by_actor_id="admin",
+            )
+        )
+
+        assert repository.list_for_organization("studio-a")[0].id == created.id
+        assert repository.get_by_normalized_label(
+            "studio-a", "distribution_mode", "limited theatrical"
+        ) is not None
+        assert repository.list_for_organization("studio-b") == []
 
 
 def test_invitation_repository_matches_pending_email_only() -> None:

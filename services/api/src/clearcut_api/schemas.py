@@ -34,6 +34,7 @@ MembershipRole = Literal["admin", "producer", "coordinator", "legal_reviewer", "
 MembershipStatus = Literal["active", "invited", "suspended"]
 InvitationStatus = Literal["pending", "accepted", "revoked", "expired"]
 RecheckStatus = Literal["active", "paused"]
+ProjectOptionType = Literal["project_type", "territory", "distribution_mode"]
 
 
 class ProjectCreate(BaseModel):
@@ -65,6 +66,18 @@ class ProjectRead(BaseModel):
     status: ProjectStatus
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectOptionRead(BaseModel):
+    id: str
+    option_type: ProjectOptionType
+    label: str
+    is_custom: bool = False
+
+
+class ProjectOptionCreate(BaseModel):
+    option_type: ProjectOptionType
+    label: str = Field(min_length=1, max_length=120)
 
 
 class WorkspaceOverviewRead(BaseModel):

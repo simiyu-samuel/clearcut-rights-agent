@@ -24,6 +24,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import AuthenticatedIdentity, authenticate_request
@@ -43,6 +44,7 @@ from .models import (
     Notification,
     Organization,
     OrganizationInvitation,
+    OrganizationOption,
     OutreachDraft,
     Project,
     ProjectAttachment,
@@ -71,6 +73,7 @@ from .repositories import (
     MembershipRepository,
     NotificationRepository,
     OrganizationInvitationRepository,
+    OrganizationOptionRepository,
     OrganizationRepository,
     OutreachDraftRepository,
     ProjectAttachmentRepository,
@@ -115,6 +118,8 @@ from .schemas import (
     PlaybookRead,
     ProjectAttachmentRead,
     ProjectCreate,
+    ProjectOptionCreate,
+    ProjectOptionRead,
     ProjectRead,
     ProjectUpdate,
     ResearchFollowUpCreate,
@@ -178,7 +183,52 @@ MEDIA_MIME_BY_EXTENSION = {
     ".m4a": "audio/mp4",
     ".ogg": "audio/ogg",
 }
+DEFAULT_PROJECT_OPTIONS: dict[str, list[str]] = {
+    "project_type": [
+        "Feature film",
+        "Short film",
+        "Documentary",
+        "Series",
+        "Commercial",
+        "Music video",
+        "Branded content",
+    ],
+    "territory": [
+        "Kenya",
+        "United Kingdom",
+        "United States",
+        "Canada",
+        "European Union",
+        "Australia",
+        "Worldwide",
+    ],
+    "distribution_mode": [
+        "Streaming",
+        "Theatrical",
+        "Broadcast",
+        "TVOD",
+        "AVOD",
+        "Festival",
+        "Educational",
+        "Social",
+    ],
+}
 request_logger = logging.getLogger("clearcut.request")
+
+
+def normalize_option_label(value: str) -> str:
+    return " ".join(value.strip().casefold().split())
+
+
+def project_option_read(
+    option_type: str, label: str, *, option_id: str, is_custom: bool
+) -> ProjectOptionRead:
+    return ProjectOptionRead(
+        id=option_id,
+        option_type=option_type,  # type: ignore[arg-type]
+        label=label,
+        is_custom=is_custom,
+    )
 
 
 def as_utc(value: datetime) -> datetime:
@@ -704,6 +754,108 @@ def create_app(
             slug=organization_id,
             created_at=now,
             updated_at=now,
+        )
+
+    @app.get(
+        "/v1/organizations/current/project-options",
+        response_model=list[ProjectOptionRead],
+        tags=["organization"],
+    )
+    def list_project_options(
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> list[ProjectOptionRead]:
+        options: list[ProjectOptionRead] = []
+        seen: set[tuple[str, str]] = set()
+        for option_type, labels in DEFAULT_PROJECT_OPTIONS.items():
+            for label in labels:
+                normalized_label = normalize_option_label(label)
+                seen.add((option_type, normalized_label))
+                options.append(
+                    project_option_read(
+                        option_type,
+                        label,
+                        option_id=f"builtin-{option_type}-{normalized_label.replace(' ', '-')}",
+                        is_custom=False,
+                    )
+                )
+
+        for option in OrganizationOptionRepository(session).list_for_organization(organization_id):
+            key = (option.option_type, option.normalized_label)
+            if key in seen:
+                continue
+            options.append(
+                project_option_read(
+                    option.option_type,
+                    option.label,
+                    option_id=option.id,
+                    is_custom=True,
+                )
+            )
+        return options
+
+    @app.post(
+        "/v1/organizations/current/project-options",
+        response_model=ProjectOptionRead,
+        status_code=status.HTTP_201_CREATED,
+        tags=["organization"],
+    )
+    def create_project_option(
+        payload: ProjectOptionCreate,
+        x_actor_id: str = Depends(get_actor_id),
+        session: Session = Depends(get_db),
+        organization_id: str = Depends(get_organization_id),
+    ) -> ProjectOptionRead:
+        actor_id = x_actor_id or "demo-user"
+        require_role(session, organization_id, actor_id, {"admin", "producer"})
+        label = " ".join(payload.label.strip().split())
+        normalized_label = normalize_option_label(label)
+        if normalized_label in {
+            normalize_option_label(value)
+            for value in DEFAULT_PROJECT_OPTIONS[payload.option_type]
+        }:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="option_already_exists")
+
+        repository = OrganizationOptionRepository(session)
+        if repository.get_by_normalized_label(
+            organization_id, payload.option_type, normalized_label
+        ) is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="option_already_exists")
+
+        option = OrganizationOption(
+            organization_id=organization_id,
+            option_type=payload.option_type,
+            label=label,
+            normalized_label=normalized_label,
+            created_by_actor_id=actor_id,
+        )
+        try:
+            created = repository.create(option)
+        except IntegrityError as error:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="option_already_exists"
+            ) from error
+
+        session.add(
+            AuditEvent(
+                organization_id=organization_id,
+                actor_type="user",
+                actor_id=actor_id,
+                action="organization.project_option_created",
+                resource_type="organization_option",
+                resource_id=created.id,
+                metadata_json=json.dumps(
+                    {"option_type": created.option_type, "label": created.label}
+                ),
+            )
+        )
+        session.commit()
+        return project_option_read(
+            created.option_type,
+            created.label,
+            option_id=created.id,
+            is_custom=True,
         )
 
     @app.get(

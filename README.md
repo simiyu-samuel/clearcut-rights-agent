@@ -75,6 +75,7 @@ Authentication configuration is documented in [infra/README.md](infra/README.md)
 - Dedicated project workspace areas for the command center, source versions, rights inventory, review, research, permission requests, reports, activity, and project settings.
 - Dashboard metrics derived from workspace records rather than hard-coded presentation values.
 - Project status, source versions, asset counts, blockers, evidence coverage, and delivery-readiness signals.
+- Searchable multi-select project setup with workspace-managed project types, territories, and distribution modes.
 - Loading, empty, retry, partial, error, and completed states for the main workflows.
 
 ### Authentication and workspace access
@@ -348,6 +349,8 @@ POST   /v1/organizations
 GET    /v1/organizations/current/members
 GET    /v1/organizations/current/invitations
 POST   /v1/organizations/current/invitations
+GET    /v1/organizations/current/project-options
+POST   /v1/organizations/current/project-options
 POST   /v1/organizations/current/api-keys
 
 POST   /v1/projects
